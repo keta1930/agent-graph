@@ -1,25 +1,89 @@
-# Python-generated files
+# Python: bytecode, build artifacts, and packaging metadata
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+*.so
+.Python
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
+eggs/
+.eggs/
+develop-eggs/
+pip-wheel-metadata/
+share/python-wheels/
 
-# Virtual environments
-.venv
-.trae/
+# Python: virtual environments and tool caches
+.venv/
+venv/
+env/
+ENV/
+.tox/
+.nox/
+.pytest_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
 
+# Jupyter and documentation build output
+.ipynb_checkpoints/
+site/
+
+# Node.js and Vite build artifacts
+node_modules/
+dist-ssr/
+coverage/
+*.tsbuildinfo
+.vite/
+vite.config.*.timestamp-*
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# IDE and operating-system files
 .idea/
+.vscode/*
+!.vscode/extensions.json
+.trae/
+.qoder/
+.qoderignore
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
 
+# Local Agent workspaces and generated artifacts
+.claude/
+.kiro/
+agent-workspace/
+.file/
+
+# Repository-specific local working directories
 test/
 experimental/
-.qoderignore
-
-.qoder/
-
-.claude
-
 spec/
-
-agent-workspace/

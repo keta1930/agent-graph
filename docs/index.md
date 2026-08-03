@@ -4,11 +4,11 @@ Agent-Graph is an integrated platform for building, orchestrating, and managing 
 
 ## System Framework
 
-![Agent-Graph System Framework](assets/Framework/agent_graph_framework_en.png)
+![Agent-Graph System Framework](assets/Framework/agent_graph_framework_en.webp)
 
 ## User Journey
 
-![User Journey Map](assets/Framework/user_journey_en.png)
+![User Journey Map](assets/Framework/user_journey_en.webp)
 
 ## Quick Start
 

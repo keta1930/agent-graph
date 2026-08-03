@@ -26,11 +26,11 @@ Agent-Graph is a Multi-Agent System built on the principles of Context Engineeri
 
 ### System Architecture
 
-![Agent Graph System Framework](docs/assets/Framework/agent_graph_framework_en.png)
+![Agent Graph System Framework](docs/assets/Framework/agent_graph_framework_en.webp)
 
 ### User Journey
 
-![User Journey](docs/assets/Framework/user_journey_en.png)
+![User Journey](docs/assets/Framework/user_journey_en.webp)
 
 ## 2. Deployment Guide
 
@@ -96,11 +96,11 @@ Open browser and visit: **http://localhost:20050**
 
 **Login Page (Admin login with username and password configured in `.env`):**
 
-![Login Page](docs/assets/Login/login_page_en.png)
+![Login Page](docs/assets/Login/login_page_en.webp)
 
 **Registration Page (New users can register with invitation code):**
 
-![Registration Page](docs/assets/Login/register_page_en.png)
+![Registration Page](docs/assets/Login/register_page_en.webp)
 
 **Other Access Endpoints:**
 - API Documentation: http://localhost:20050/docs
@@ -193,63 +193,63 @@ These features are under continuous exploration and planning:
 ### 5.1. Chat Welcome Page
 Entry interface for starting conversations with Agents, supporting quick selection of preset Agents or creating new conversations.
 
-![Chat Welcome Page](docs/assets/Page/chat_welcome_en.png)
+![Chat Welcome Page](docs/assets/Page/chat_welcome_en.webp)
 
 ---
 
 ### 5.2. Workspace - Agent Management
 Create, configure, and manage agents, set system prompts, tools, and model parameters.
 
-![Agent Management](docs/assets/Page/workspace_agent_en.png)
+![Agent Management](docs/assets/Page/workspace_agent_en.webp)
 
 ---
 
 ### 5.3. Workspace - Workflow Management
 Visual drag-and-drop workflow designer, supporting multiple node types and complex process orchestration.
 
-![Workflow Management](docs/assets/Page/workspace_workflow_en.png)
+![Workflow Management](docs/assets/Page/workspace_workflow_en.webp)
 
 ---
 
 ### 5.4. Workspace - Model Management
 Configure and manage multiple LLM models, set API Keys and model parameters.
 
-![Model Management](docs/assets/Page/workspace_model_en.png)
+![Model Management](docs/assets/Page/workspace_model_en.webp)
 
 ---
 
 ### 5.5. Workspace - System Toolbox
 View and configure built-in system tools, including resource creation and collaboration tools.
 
-![System Toolbox](docs/assets/Page/workspace_systemtools_en.png)
+![System Toolbox](docs/assets/Page/workspace_systemtools_en.webp)
 
 ---
 
 ### 5.6. Workspace - MCP Management
 Manage MCP server connections, configure external tool and data source integrations.
 
-![MCP Management](docs/assets/Page/workspace_mcp_en.png)
+![MCP Management](docs/assets/Page/workspace_mcp_en.webp)
 
 ---
 
 ### 5.7. Workspace - Prompt Management
 Centrally manage reusable Prompt templates, supporting categorization and version control.
 
-![Prompt Management](docs/assets/Page/workspace_prompt_en.png)
+![Prompt Management](docs/assets/Page/workspace_prompt_en.webp)
 
 ---
 
 ### 5.8. Workspace - File Management
 Manage uploaded files and attachments, supporting file preview and organization.
 
-![File Management](docs/assets/Page/workspace_filemanager_en.png)
+![File Management](docs/assets/Page/workspace_filemanager_en.webp)
 
 ---
 
 ### 5.9. Workspace - Memory Management
 View and manage Agent's long-term memory and knowledge base.
 
-![Memory Management](docs/assets/Page/workspace_memory_en.png)
+![Memory Management](docs/assets/Page/workspace_memory_en.webp)
 
 ---
 

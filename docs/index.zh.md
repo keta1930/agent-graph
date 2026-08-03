@@ -4,11 +4,11 @@ Agent-Graph 是一个集成平台，用于构建、编排和管理 AI 智能体�
 
 ## 系统框架
 
-![智能体图系统框架](assets/Framework/agent_graph_framework_zh.png)
+![智能体图系统框架](assets/Framework/agent_graph_framework_zh.webp)
 
 ## 用户使用流程
 
-![用户旅程图](assets/Framework/user_journey_zh.png)
+![用户旅程图](assets/Framework/user_journey_zh.webp)
 
 ## 快速开始
 

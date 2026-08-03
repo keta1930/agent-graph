@@ -21,7 +21,7 @@ MCP Inspector 是测试界面,用于:
 2. 点击已连接服务器卡片上的**扳手图标**
 3. 检查器打开,显示所有可用工具
 
-![工具标签页](../../assets/Mcp/mcp_inspector_toolname_zh.png)
+![工具标签页](../../assets/Mcp/mcp_inspector_toolname_zh.webp)
 
 ## 工具界面
 
@@ -44,7 +44,7 @@ MCP Inspector 是测试界面,用于:
 
 点击**测试工具**按钮执行。
 
-![测试结果](../../assets/Mcp/mcp_inpector_testtool_zh.png)
+![测试结果](../../assets/Mcp/mcp_inpector_testtool_zh.webp)
 
 ## 下一步
 

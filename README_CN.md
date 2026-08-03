@@ -26,11 +26,11 @@ Agent-Graph 是一个基于上下文工程（Context Engineering）理念构建�
 
 ### 系统框架
 
-![智能体图系统框架](docs/assets/Framework/agent_graph_framework_zh.png)
+![智能体图系统框架](docs/assets/Framework/agent_graph_framework_zh.webp)
 
 ### 用户使用流程
 
-![用户旅程图](docs/assets/Framework/user_journey_zh.png)
+![用户旅程图](docs/assets/Framework/user_journey_zh.webp)
 
 ## 2. 部署指南
 
@@ -96,11 +96,11 @@ nohup python main.py > app.log 2>&1 &
 
 **登录页面（管理员直接用`.env`配置的用户名密码登录）:**
 
-![登录页面](docs/assets/Login/login_page_zh.png)
+![登录页面](docs/assets/Login/login_page_zh.webp)
 
 **注册页面（新用户可以使用邀请码注册后登录）:**
 
-![注册页面](docs/assets/Login/register_page_zh.png)
+![注册页面](docs/assets/Login/register_page_zh.webp)
 
 **其他访问端点:**
 - API 文档: http://localhost:20050/docs
@@ -193,63 +193,63 @@ npm run build  # 构建生产版本
 ### 5.1. 对话欢迎页
 开始与 Agent 对话的入口界面，支持快速选择预设 Agent 或创建新对话。
 
-![对话欢迎页](docs/assets/Page/chat_welcome_zh.png)
+![对话欢迎页](docs/assets/Page/chat_welcome_zh.webp)
 
 ---
 
 ### 5.2. 工作空间 - 智能体管理
 创建、配置和管理智能体，设置系统提示词、工具和模型参数。
 
-![智能体管理](docs/assets/Page/workspace_agent_zh.png)
+![智能体管理](docs/assets/Page/workspace_agent_zh.webp)
 
 ---
 
 ### 5.3. 工作空间 - 工作流管理
 可视化拖拽式工作流设计器，支持多种节点类型和复杂流程编排。
 
-![工作流管理](docs/assets/Page/workspace_workflow_zh.png)
+![工作流管理](docs/assets/Page/workspace_workflow_zh.webp)
 
 ---
 
 ### 5.4. 工作空间 - 模型管理
 配置和管理多个 LLM 模型，设置 API Key 和模型参数。
 
-![模型管理](docs/assets/Page/workspace_model_zh.png)
+![模型管理](docs/assets/Page/workspace_model_zh.webp)
 
 ---
 
 ### 5.5. 工作空间 - 系统工具箱
 查看和配置系统内置工具，包括资源创建和协作工具。
 
-![系统工具箱](docs/assets/Page/workspace_systemtools_zh.png)
+![系统工具箱](docs/assets/Page/workspace_systemtools_zh.webp)
 
 ---
 
 ### 5.6. 工作空间 - MCP 管理
 管理 MCP 服务器连接，配置外部工具和数据源集成。
 
-![MCP 管理](docs/assets/Page/workspace_mcp_zh.png)
+![MCP 管理](docs/assets/Page/workspace_mcp_zh.webp)
 
 ---
 
 ### 5.7. 工作空间 - 提示词管理
 集中管理可复用的 Prompt 模板，支持分类和版本控制。
 
-![提示词管理](docs/assets/Page/workspace_prompt_zh.png)
+![提示词管理](docs/assets/Page/workspace_prompt_zh.webp)
 
 ---
 
 ### 5.8. 工作空间 - 文件管理
 管理上传的文件和附件，支持文件预览和组织。
 
-![文件管理](docs/assets/Page/workspace_filemanager_zh.png)
+![文件管理](docs/assets/Page/workspace_filemanager_zh.webp)
 
 ---
 
 ### 5.9. 工作空间 - 记忆管理
 查看和管理 Agent 的长期记忆和知识库。
 
-![记忆管理](docs/assets/Page/workspace_memory_zh.png)
+![记忆管理](docs/assets/Page/workspace_memory_zh.webp)
 
 ---
 
@@ -271,4 +271,4 @@ npm run build  # 构建生产版本
 
 由于群满200人，如需入群或者合作交流可以联系：
 
-![微信群二维码](docs/assets/wechat.png)
+![微信群二维码](docs/assets/wechat.webp)

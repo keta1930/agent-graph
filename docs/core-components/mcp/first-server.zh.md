@@ -13,7 +13,7 @@
 
 ## JSON 编辑器添加
 
-![JSON 编辑器](../../assets/Mcp/add_mcp_json_zh.png)
+![JSON 编辑器](../../assets/Mcp/add_mcp_json_zh.webp)
 
 ### STDIO 示例
 
@@ -75,7 +75,7 @@
 
 适用于本地 Python/Node.js 服务器：
 
-![添加 STDIO 服务器](../../assets/Mcp/add_mcp_zh.png)
+![添加 STDIO 服务器](../../assets/Mcp/add_mcp_zh.webp)
 
 | 字段 | 说明 | 示例 |
 |------|------|------|

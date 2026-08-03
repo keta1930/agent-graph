@@ -21,7 +21,7 @@ Navigate to **MCP Manager** from workspace sidebar, then:
 2. Click the **wrench icon** on any connected server card
 3. Inspector opens showing all available tools
 
-![Tool Tabs](../../assets/Mcp/mcp_inspector_toolname_en.png)
+![Tool Tabs](../../assets/Mcp/mcp_inspector_toolname_en.webp)
 
 ## Tool Interface
 
@@ -44,7 +44,7 @@ The form automatically generates inputs based on parameter types
 
 Click **Test Tool** button to execute.
 
-![Test Result](../../assets/Mcp/mcp_inspector_testtool_en.png)
+![Test Result](../../assets/Mcp/mcp_inspector_testtool_en.webp)
 
 ## Next Steps
 

@@ -10,7 +10,7 @@
 
 管理员需要登录后才能访问管理后台。
 
-![管理后台](../../assets/Admin/admin_page_zh.png)
+![管理后台](../../assets/Admin/admin_page_zh.webp)
 
 ## 用户管理
 

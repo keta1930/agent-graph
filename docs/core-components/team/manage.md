@@ -10,7 +10,7 @@ Navigate to `/admin` page directly in your browser (e.g., `https://agent-graph.c
 
 Administrators must login to access the admin panel.
 
-![Admin Panel](../../assets/Admin/admin_page_en.png)
+![Admin Panel](../../assets/Admin/admin_page_en.webp)
 
 ## User Management
 

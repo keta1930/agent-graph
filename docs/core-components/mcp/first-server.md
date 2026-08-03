@@ -15,7 +15,7 @@ Find an MCP server from:
 
 For advanced configuration, switch to JSON view in MCP Manager.
 
-![JSON Editor](../../assets/Mcp/add_mcp_json_en.png)
+![JSON Editor](../../assets/Mcp/add_mcp_json_en.webp)
 
 ### STDIO Example
 
@@ -77,7 +77,7 @@ Navigate to **MCP Manager** from the workspace sidebar.
 
 For local Python/Node.js servers:
 
-![Add STDIO Server](../../assets/Mcp/add_mcp_en.png)
+![Add STDIO Server](../../assets/Mcp/add_mcp_en.webp)
 
 | Field | Description | Example |
 |-------|-------------|---------|

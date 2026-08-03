@@ -2,7 +2,7 @@
 
 ## For Administrators: Team Management
 
-Visit the Admin Panel at `http://localhost:9999/admin` to manage your team and invite collaborators.
+Visit the Admin Panel at `http://localhost:20050/admin` to manage your team and invite collaborators.
 
 ### 1. Create Invite Codes
 

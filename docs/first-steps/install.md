@@ -36,13 +36,20 @@ Edit the `.env` file with your configuration:
 |---------------|-------------|---------|
 | MONGO_ROOT_USERNAME | MongoDB admin username | admin |
 | MONGO_ROOT_PASSWORD | MongoDB admin password | strongpassword123 |
-| MONGO_PORT | MongoDB service port | 27017 |
-| MONGO_EXPRESS_PORT | Database management UI port | 8081 |
+| MONGO_DATABASE | MongoDB database name | agent-graph |
+| MONGO_PORT | MongoDB service port | 20040 |
+| MONGO_EXPRESS_PORT | Database management UI port | 20041 |
+| MONGO_EXPRESS_USERNAME | Mongo Express web UI username | admin |
+| MONGO_EXPRESS_PASSWORD | Mongo Express web UI password | strongpassword123 |
 | MINIO_ROOT_USER | MinIO admin username | minioadmin |
 | MINIO_ROOT_PASSWORD | MinIO admin password | minioadmin123 |
-| MINIO_API_PORT | MinIO API port | 9000 |
-| MINIO_CONSOLE_PORT | MinIO web console port | 9011 |
+| MINIO_API_PORT | MinIO API port | 20042 |
+| MINIO_CONSOLE_PORT | MinIO web console port | 20043 |
+| MINIO_SECURE | Enable TLS for the MinIO client | false |
 | JWT_SECRET_KEY | Security key for authentication | Generate using script |
+| JWT_ALGORITHM | JWT signing algorithm | HS256 |
+| JWT_ACCESS_TOKEN_EXPIRE_MINUTES | Access Token lifetime in minutes | 15 |
+| JWT_REFRESH_TOKEN_EXPIRE_DAYS | Refresh Token lifetime in days | 7 |
 | ADMIN_USERNAME | Super admin username | admin |
 | ADMIN_PASSWORD | Super admin password | securepassword |
 
@@ -56,8 +63,8 @@ docker-compose up -d
 
 Verify services are running:
 
-- MongoDB Express: http://localhost:8081
-- MinIO Console: http://localhost:9011
+- MongoDB Express: http://localhost:20041
+- MinIO Console: http://localhost:20043
 
 ### 4. Deploy Backend
 
@@ -95,7 +102,7 @@ nohup python main.py > app.log 2>&1 &
 
 Open your browser and navigate to:
 
-**http://localhost:9999**
+**http://localhost:20050**
 
 You will see the login page. Use the credentials from your `.env` file:
 
@@ -104,10 +111,10 @@ You will see the login page. Use the credentials from your `.env` file:
 
 **Additional endpoints:**
 
-- API Documentation: http://localhost:9999/docs
-- Health Check: http://localhost:9999/health
-- MongoDB Express: http://localhost:8081
-- MinIO Console: http://localhost:9011
+- API Documentation: http://localhost:20050/docs
+- Health Check: http://localhost:20050/health
+- MongoDB Express: http://localhost:20041
+- MinIO Console: http://localhost:20043
 
 ## Verification
 
@@ -115,11 +122,11 @@ After installation, verify all services are running correctly:
 
 | Service | URL | Expected Status |
 |---------|-----|-----------------|
-| Web Application | http://localhost:9999 | Login page displayed |
-| API Documentation | http://localhost:9999/docs | Interactive API docs |
-| Health Check | http://localhost:9999/health | JSON: `{"status": "healthy"}` |
-| MongoDB Express | http://localhost:8081 | Database management UI |
-| MinIO Console | http://localhost:9011 | Object storage console |
+| Web Application | http://localhost:20050 | Login page displayed |
+| API Documentation | http://localhost:20050/docs | Interactive API docs |
+| Health Check | http://localhost:20050/health | JSON response containing `"status": "healthy"` |
+| MongoDB Express | http://localhost:20041 | Database management UI |
+| MinIO Console | http://localhost:20043 | Object storage console |
 
 ## Troubleshooting
 
@@ -128,7 +135,7 @@ After installation, verify all services are running correctly:
 | Docker services fail to start | Check ports are not already in use, verify Docker is running |
 | Backend connection error | Verify MongoDB and MinIO are running, check `.env` configuration |
 | Cannot login | Verify admin credentials in `.env` file match login attempt |
-| Port 9999 already in use | Change the port in `agent_graph/main.py` (default: 9999) |
+| Backend port already in use | Change the port in `agent_graph/main.py` (default: 20050) |
 
 ## For Developers
 
@@ -148,7 +155,7 @@ npm install
 npm run dev
 ```
 
-The development server will start at http://localhost:5173 with hot-reload enabled.
+The development server will start at http://localhost:20051 with hot-reload enabled.
 
 **Building Frontend:**
 
@@ -158,7 +165,7 @@ After making changes to the frontend:
 npm run build
 ```
 
-This creates optimized production files in `frontend/dist/` which will be served by the backend.
+This creates optimized production files in `agent_graph/dist/` which will be served by the backend.
 
 **Note:** The repository includes pre-built frontend files, so this step is only needed if you're developing or customizing the frontend.
 

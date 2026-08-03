@@ -36,13 +36,20 @@ cp .env.example .env
 |--------|------|------|
 | MONGO_ROOT_USERNAME | MongoDB 管理员用户名 | admin |
 | MONGO_ROOT_PASSWORD | MongoDB 管理员密码 | strongpassword123 |
-| MONGO_PORT | MongoDB 服务端口 | 27017 |
-| MONGO_EXPRESS_PORT | 数据库管理界面端口 | 8081 |
+| MONGO_DATABASE | MongoDB 数据库名称 | agent-graph |
+| MONGO_PORT | MongoDB 服务端口 | 20040 |
+| MONGO_EXPRESS_PORT | 数据库管理界面端口 | 20041 |
+| MONGO_EXPRESS_USERNAME | Mongo Express 管理界面用户名 | admin |
+| MONGO_EXPRESS_PASSWORD | Mongo Express 管理界面密码 | strongpassword123 |
 | MINIO_ROOT_USER | MinIO 管理员用户名 | minioadmin |
 | MINIO_ROOT_PASSWORD | MinIO 管理员密码 | minioadmin123 |
-| MINIO_API_PORT | MinIO API 端口 | 9000 |
-| MINIO_CONSOLE_PORT | MinIO 控制台端口 | 9011 |
+| MINIO_API_PORT | MinIO API 端口 | 20042 |
+| MINIO_CONSOLE_PORT | MinIO 控制台端口 | 20043 |
+| MINIO_SECURE | MinIO 客户端是否启用 TLS | false |
 | JWT_SECRET_KEY | 认证安全密钥 | 使用脚本生成 |
+| JWT_ALGORITHM | JWT 签名算法 | HS256 |
+| JWT_ACCESS_TOKEN_EXPIRE_MINUTES | Access Token 有效期（分钟） | 15 |
+| JWT_REFRESH_TOKEN_EXPIRE_DAYS | Refresh Token 有效期（天） | 7 |
 | ADMIN_USERNAME | 超级管理员用户名 | admin |
 | ADMIN_PASSWORD | 超级管理员密码 | securepassword |
 
@@ -56,8 +63,8 @@ docker-compose up -d
 
 验证服务运行状态:
 
-- MongoDB Express: http://localhost:8081
-- MinIO 控制台: http://localhost:9011
+- MongoDB Express: http://localhost:20041
+- MinIO 控制台: http://localhost:20043
 
 ### 4. 部署后端
 
@@ -95,7 +102,7 @@ nohup python main.py > app.log 2>&1 &
 
 打开浏览器，访问:
 
-**http://localhost:9999**
+**http://localhost:20050**
 
 您将看到登录页面。使用 `.env` 文件中配置的凭据登录:
 
@@ -104,10 +111,10 @@ nohup python main.py > app.log 2>&1 &
 
 **其他访问端点:**
 
-- API 文档: http://localhost:9999/docs
-- 健康检查: http://localhost:9999/health
-- MongoDB Express: http://localhost:8081
-- MinIO 控制台: http://localhost:9011
+- API 文档: http://localhost:20050/docs
+- 健康检查: http://localhost:20050/health
+- MongoDB Express: http://localhost:20041
+- MinIO 控制台: http://localhost:20043
 
 ## 验证安装
 
@@ -115,11 +122,11 @@ nohup python main.py > app.log 2>&1 &
 
 | 服务 | 地址 | 预期状态 |
 |------|------|----------|
-| Web 应用 | http://localhost:9999 | 显示登录页面 |
-| API 文档 | http://localhost:9999/docs | 显示交互式 API 文档 |
-| 健康检查 | http://localhost:9999/health | JSON: `{"status": "healthy"}` |
-| MongoDB Express | http://localhost:8081 | 数据库管理界面 |
-| MinIO 控制台 | http://localhost:9011 | 对象存储控制台 |
+| Web 应用 | http://localhost:20050 | 显示登录页面 |
+| API 文档 | http://localhost:20050/docs | 显示交互式 API 文档 |
+| 健康检查 | http://localhost:20050/health | JSON 响应包含 `"status": "healthy"` |
+| MongoDB Express | http://localhost:20041 | 数据库管理界面 |
+| MinIO 控制台 | http://localhost:20043 | 对象存储控制台 |
 
 ## 故障排查
 
@@ -128,7 +135,7 @@ nohup python main.py > app.log 2>&1 &
 | Docker 服务启动失败 | 检查端口是否被占用,验证 Docker 是否运行 |
 | 后端连接错误 | 验证 MongoDB 和 MinIO 是否运行,检查 `.env` 配置 |
 | 无法登录 | 验证 `.env` 文件中的管理员凭据与登录信息匹配 |
-| 端口 9999 已被占用 | 在 `agent_graph/main.py` 中修改端口 (默认: 9999) |
+| 后端端口已被占用 | 修改 `agent_graph/main.py` 中的端口（默认：20050） |
 
 ## 开发者指南
 
@@ -148,7 +155,7 @@ npm install
 npm run dev
 ```
 
-开发服务器将在 http://localhost:5173 启动，支持热重载。
+开发服务器将在 http://localhost:20051 启动，支持热重载。
 
 **构建前端:**
 
@@ -158,7 +165,7 @@ npm run dev
 npm run build
 ```
 
-这会在 `frontend/dist/` 中创建优化后的生产文件，后端将自动提供这些文件。
+这会在 `agent_graph/dist/` 中创建优化后的生产文件，后端将自动提供这些文件。
 
 **注意:** 仓库中已包含预构建的前端文件，只有在开发或自定义前端时才需要此步骤。
 

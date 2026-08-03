@@ -246,6 +246,8 @@ async def generate_mcp_script(graph_name: str, current_user: CurrentUser = Depen
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"找不到图 '{graph_name}'"
             )
+        # TODO: Graph→MCP 导出功能待重设计。此 host 是生成脚本回调本服务 API 的地址，
+        # 当前 localhost:9999 是过时端口，重设计时应改为可配置的 API_BASE_URL。
         host = "http://localhost:9999"
         graph_config = graph_doc.get("config", {})
 

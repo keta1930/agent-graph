@@ -13,7 +13,7 @@ Frontend (Node, npm):
 - `npm run lint` — ESLint with TypeScript strict rules
 
 Infrastructure:
-- `docker compose -f docker/agent_graph_services/docker-compose.yml up -d` — start MongoDB, MinIO, Milvus, and admin UIs
+- `docker compose -f docker/agent_graph_services/docker-compose.yml up -d` — start MongoDB, Mongo Express, and MinIO
 
 Docs:
 - `mkdocs build` — build documentation site

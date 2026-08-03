@@ -64,8 +64,8 @@ docker-compose up -d
 ```
 
 **Service Addresses:**
-- MongoDB Express (Database Management): http://localhost:8081
-- MinIO Console (File Storage): http://localhost:9011
+- MongoDB Express (Database Management): http://localhost:20041
+- MinIO Console (File Storage): http://localhost:20043
 
 #### 2.3. Deploy Backend
 
@@ -92,7 +92,7 @@ nohup python main.py > app.log 2>&1 &
 
 #### 2.4. Access Application
 
-Open browser and visit: **http://localhost:9999**
+Open browser and visit: **http://localhost:20050**
 
 **Login Page (Admin login with username and password configured in `.env`):**
 
@@ -103,8 +103,8 @@ Open browser and visit: **http://localhost:9999**
 ![Registration Page](docs/assets/Login/register_page_en.png)
 
 **Other Access Endpoints:**
-- API Documentation: http://localhost:9999/docs
-- Health Check: http://localhost:9999/health
+- API Documentation: http://localhost:20050/docs
+- Health Check: http://localhost:20050/health
 
 ### Frontend Development (Optional)
 
@@ -113,7 +113,7 @@ If you need to modify frontend code:
 ```bash
 cd frontend
 npm install
-npm run dev  # Development server: http://localhost:5173
+npm run dev  # Development server: http://localhost:20051
 npm run build  # Build production version
 ```
 

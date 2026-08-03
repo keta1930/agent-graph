@@ -64,8 +64,8 @@ docker-compose up -d
 ```
 
 **服务地址：**
-- MongoDB Express (数据库管理): http://localhost:8081
-- MinIO 控制台 (文件存储): http://localhost:9011
+- MongoDB Express (数据库管理): http://localhost:20041
+- MinIO 控制台 (文件存储): http://localhost:20043
 
 #### 2.3. 部署后端
 
@@ -92,7 +92,7 @@ nohup python main.py > app.log 2>&1 &
 
 #### 2.4. 访问应用
 
-打开浏览器访问: **http://localhost:9999**
+打开浏览器访问: **http://localhost:20050**
 
 **登录页面（管理员直接用`.env`配置的用户名密码登录）:**
 
@@ -103,8 +103,8 @@ nohup python main.py > app.log 2>&1 &
 ![注册页面](docs/assets/Login/register_page_zh.png)
 
 **其他访问端点:**
-- API 文档: http://localhost:9999/docs
-- 健康检查: http://localhost:9999/health
+- API 文档: http://localhost:20050/docs
+- 健康检查: http://localhost:20050/health
 
 ### 前端开发（可选）
 
@@ -113,7 +113,7 @@ nohup python main.py > app.log 2>&1 &
 ```bash
 cd frontend
 npm install
-npm run dev  # 开发服务器: http://localhost:5173
+npm run dev  # 开发服务器: http://localhost:20051
 npm run build  # 构建生产版本
 ```
 

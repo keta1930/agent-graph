@@ -192,7 +192,7 @@ class MongoDBClient:
             await self.conversations_collection.create_index([("user_id", 1), ("type", 1), ("created_at", -1)])
             await self.conversations_collection.create_index([("status", 1)])
             await self.conversations_collection.create_index([("updated_at", -1)])
-            await self.conversations_collection.create_index([("project_id", 1, "updated_at", -1)])
+            await self.conversations_collection.create_index([("project_id", 1), ("updated_at", -1)])
             await self.conversations_collection.create_index([("user_id", 1), ("project_id", 1)])
 
 
@@ -269,8 +269,9 @@ class MongoDBClient:
 
             logger.info("MongoDB索引创建成功")
 
-        except Exception as e:
-            logger.error(f"创建MongoDB索引失败: {str(e)}")
+        except Exception:
+            logger.error("创建MongoDB索引失败", exc_info=True)
+            raise
 
     async def disconnect(self):
         """断开MongoDB连接"""

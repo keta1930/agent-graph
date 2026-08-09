@@ -18,7 +18,11 @@ Infrastructure:
 - `docker compose --env-file .env -f docker/docker-compose.yml up -d` — start MongoDB, Mongo Express, and MinIO (reads config from root `.env`)
 
 Docs:
-- `mkdocs build` — build documentation site
+- `mkdocs build --strict` — build the documentation site and fail on warnings
+
+Release packaging:
+- `cd frontend && npm ci && npm run build` — refresh the frontend assets in `agent_graph/dist/`
+- Run `uv build` from the repository root after the frontend build — create wheel and sdist with the current frontend assets
 
 ## Architecture
 

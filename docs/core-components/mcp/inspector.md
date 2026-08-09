@@ -49,5 +49,5 @@ Click **Test Tool** button to execute.
 ## Next Steps
 
 - **[Add MCP Server](first-server.md)** - Connect more servers
-- **[Use in Agents](../agent/config.md#mcp-servers)** - Attach tested tools to agents
+- **[Use in Agents](../agent/config.md#mcp)** - Attach tested tools to agents
 - **[Build Custom Server](build-with-agent.md)** - Create your own MCP tools

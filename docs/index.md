@@ -28,5 +28,5 @@ Get started with Agent-Graph in three steps:
 | [MCP Integration](core-components/mcp/index.md) | Extend capabilities with MCP servers |
 | [Memory System](core-components/memory/index.md) | Manage persistent memory |
 | [System Tools](core-components/tools/index.md) | Built-in tools and utilities |
-| [Team Collaboration](core-components/team/index.md) | Work with team members |
+| [Team Collaboration](core-components/team/manage.md) | Work with team members |
 | [Roadmap](roadmap/index.md) | Future plans and features |

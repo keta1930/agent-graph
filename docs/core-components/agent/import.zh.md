@@ -131,4 +131,4 @@
 
 - **[Agent 配置](config.zh.md)** - 了解配置字段详情
 - **[构建第一个 Agent](first-agent.zh.md)** - 手动创建 Agent
-- **[模型管理](../model/index.zh.md)** - 配置可用模型
+- **[模型管理](../model/register.zh.md)** - 配置可用模型

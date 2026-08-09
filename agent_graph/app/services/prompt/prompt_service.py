@@ -103,7 +103,7 @@ class PromptService:
             return {
                 "success": True,
                 "message": "获取提示词列表成功",
-                "data": prompt_list.dict()
+                "data": prompt_list.model_dump()
             }
         except Exception as e:
             logger.error(f"提示词服务：列出提示词失败 (user: {user_id}): {e}")

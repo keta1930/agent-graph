@@ -1,8 +1,11 @@
-from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field, root_validator
+from typing import Any, Dict, List, Optional, Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class MCPServerConfig(BaseModel):
     """MCP服务器配置"""
+    model_config = ConfigDict(extra="allow")
+
     autoApprove: List[str] = Field(default_factory=list, description="自动批准的工具列表")
     disabled: bool = Field(default=False, description="是否禁用服务器")
     timeout: int = Field(default=60, description="超时时间（秒）")
@@ -17,39 +20,40 @@ class MCPServerConfig(BaseModel):
     provider_user_id: Optional[str] = Field(None, description="提供者用户ID")
     created_at: Optional[str] = Field(None, description="创建时间")
 
-    @root_validator(pre=False, skip_on_failure=True)
-    def normalize_config(cls, values):
+    @model_validator(mode="after")
+    def normalize_config(self) -> Self:
         """规范化配置，处理type字段转换和字段验证"""
-        if 'type' in values and values['type']:
-            type_value = values['type'].lower()
+        if self.type:
+            type_value = self.type.lower()
             if type_value == 'sse':
-                values['transportType'] = 'sse'
+                self.transportType = 'sse'
             elif type_value == 'stdio':
-                values['transportType'] = 'stdio'
+                self.transportType = 'stdio'
             elif type_value in ['streamable_http', 'streamable-http']:
-                values['transportType'] = 'streamable_http'
+                self.transportType = 'streamable_http'
 
-        transport_type = values.get('transportType', '').lower().replace('-', '_')
+        transport_type = self.transportType.lower().replace('-', '_')
         if transport_type in ['streamable_http', 'streamablehttp']:
-            values['transportType'] = 'streamable_http'
+            self.transportType = 'streamable_http'
 
-        if not values.get('transportType') or values.get('transportType') == 'stdio':
-            if values.get('url'):
-                values['transportType'] = 'streamable_http'
-            elif values.get('command'):
-                values['transportType'] = 'stdio'
+        if not self.transportType or self.transportType == 'stdio':
+            if self.url:
+                self.transportType = 'streamable_http'
+            elif self.command:
+                self.transportType = 'stdio'
 
-        transport_type = values.get('transportType', 'stdio')
-        if transport_type in ['sse', 'streamable_http'] and not values.get('url'):
+        transport_type = self.transportType
+        if transport_type in ['sse', 'streamable_http'] and not self.url:
             raise ValueError(f'{transport_type}传输类型必须提供url字段')
-        if transport_type == 'stdio' and not values.get('command'):
+        if transport_type == 'stdio' and not self.command:
             raise ValueError('stdio传输类型必须提供command字段')
 
-        return values
+        return self
 
-    def dict(self, **kwargs):
-        """dict方法，根据传输类型过滤字段"""
-        data = super().dict(exclude_none=True, **kwargs)
+    def model_dump(self, **kwargs):
+        """序列化并按传输类型过滤字段。"""
+        kwargs.setdefault("exclude_none", True)
+        data = super().model_dump(**kwargs)
 
         transport_type = data.get('transportType', 'stdio')
         data.pop('type', None)
@@ -69,10 +73,6 @@ class MCPServerConfig(BaseModel):
             del data['env']
         return data
 
-    class Config:
-        extra = "allow"
-
-
 class MCPConfig(BaseModel):
     """MCP配置"""
     mcpServers: Dict[str, MCPServerConfig] = Field(
@@ -80,18 +80,18 @@ class MCPConfig(BaseModel):
         description="MCP服务器配置，键为服务器名称"
     )
 
-    def dict(self, **kwargs):
-        """dict方法确保服务器配置正确过滤"""
-        data = super().dict(**kwargs)
+    def model_dump(self, **kwargs):
+        """序列化所有 server 配置。"""
+        data = super().model_dump(**kwargs)
 
         if 'mcpServers' in data:
             filtered_servers = {}
             for server_name, server_config in data['mcpServers'].items():
                 if isinstance(server_config, MCPServerConfig):
-                    filtered_servers[server_name] = server_config.dict()
+                    filtered_servers[server_name] = server_config.model_dump()
                 else:
                     server_obj = MCPServerConfig(**server_config)
-                    filtered_servers[server_name] = server_obj.dict()
+                    filtered_servers[server_name] = server_obj.model_dump()
             data['mcpServers'] = filtered_servers
 
         return data

@@ -103,14 +103,14 @@ async def get_graph_readme(graph_name: str, current_user: CurrentUser = Depends(
 async def create_graph(graph: GraphConfig, current_user: CurrentUser = Depends(get_current_user)):
     """创建新图或更新现有图"""
     try:
-        valid, error = await graph_service.validate_graph(graph.dict(), user_id=current_user.user_id)
+        valid, error = await graph_service.validate_graph(graph.model_dump(), user_id=current_user.user_id)
         if not valid:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"图配置无效: {error}"
             )
 
-        graph_dict = graph.dict()
+        graph_dict = graph.model_dump()
 
         mcp_config_data = await mongodb_client.get_mcp_config()
         mcp_config = mcp_config_data.get("config", {"mcpServers": {}}) if mcp_config_data else {"mcpServers": {}}

@@ -3,7 +3,7 @@ Prompt 相关的数据模型定义
 """
 import re
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class PromptCreate(BaseModel):
@@ -12,7 +12,7 @@ class PromptCreate(BaseModel):
     content: str = Field(..., description="提示词内容", min_length=1)
     category: str = Field(..., description="提示词分类", min_length=1, max_length=50)
 
-    @validator('name')
+    @field_validator('name')
     def validate_name(cls, v):
         # 检查名称是否包含非法字符（不能包含路径分隔符等）
         illegal_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
@@ -21,11 +21,11 @@ class PromptCreate(BaseModel):
                 raise ValueError(f'提示词名称不能包含字符: {char}')
         return v.strip()
 
-    @validator('content')
+    @field_validator('content')
     def validate_content(cls, v):
         return v.strip()
 
-    @validator('category')
+    @field_validator('category')
     def validate_category(cls, v):
         v = v.strip()
         # 检查是否为英文（字母、数字、连字符、下划线）
@@ -39,13 +39,13 @@ class PromptUpdate(BaseModel):
     content: Optional[str] = Field(None, description="提示词内容", min_length=1)
     category: Optional[str] = Field(None, description="提示词分类", max_length=50)
 
-    @validator('content')
+    @field_validator('content')
     def validate_content(cls, v):
         if v is not None:
             return v.strip()
         return v
 
-    @validator('category')
+    @field_validator('category')
     def validate_category(cls, v):
         if v is not None:
             v = v.strip()
@@ -83,7 +83,7 @@ class PromptImportByPathRequest(BaseModel):
     name: str = Field(..., description="提示词名称", min_length=1, max_length=100)
     category: str = Field(..., description="提示词分类", min_length=1, max_length=50)
 
-    @validator('name')
+    @field_validator('name')
     def validate_name(cls, v):
         v = v.strip()
         # 检查名称是否包含非法字符（不能包含路径分隔符等）
@@ -93,7 +93,7 @@ class PromptImportByPathRequest(BaseModel):
                 raise ValueError(f'提示词名称不能包含字符: {char}')
         return v
 
-    @validator('category')
+    @field_validator('category')
     def validate_category(cls, v):
         v = v.strip()
         # 检查是否为英文（字母、数字、连字符、下划线）
@@ -107,7 +107,7 @@ class PromptImportByFileRequest(BaseModel):
     name: str = Field(..., description="提示词名称", min_length=1, max_length=100)
     category: str = Field(..., description="提示词分类", min_length=1, max_length=50)
 
-    @validator('name')
+    @field_validator('name')
     def validate_name(cls, v):
         v = v.strip()
         # 检查名称是否包含非法字符（不能包含路径分隔符等）
@@ -117,7 +117,7 @@ class PromptImportByFileRequest(BaseModel):
                 raise ValueError(f'提示词名称不能包含字符: {char}')
         return v
 
-    @validator('category')
+    @field_validator('category')
     def validate_category(cls, v):
         v = v.strip()
         # 检查是否为英文（字母、数字、连字符、下划线）
@@ -128,12 +128,12 @@ class PromptImportByFileRequest(BaseModel):
 
 class PromptExportRequest(BaseModel):
     """批量导出提示词的请求模型"""
-    names: List[str] = Field(..., description="要导出的提示词名称列表", min_items=1)
+    names: List[str] = Field(..., description="要导出的提示词名称列表", min_length=1)
 
 
 class PromptBatchDeleteRequest(BaseModel):
     """批量删除提示词请求模型"""
-    names: List[str] = Field(..., description="要删除的提示词名称列表", min_items=1)
+    names: List[str] = Field(..., description="要删除的提示词名称列表", min_length=1)
 
 
 class PromptResponse(BaseModel):

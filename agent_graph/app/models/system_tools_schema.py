@@ -1,11 +1,18 @@
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SystemToolSchema(BaseModel):
     """系统工具 Schema"""
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str = Field(..., description="工具名称")
-    schema: Dict[str, Any] = Field(..., description="工具的 OpenAI Function Schema")
+    tool_schema: Dict[str, Any] = Field(
+        ...,
+        alias="schema",
+        serialization_alias="schema",
+        description="工具的 OpenAI Function Schema",
+    )
 
 
 class ToolCategory(BaseModel):
@@ -24,7 +31,14 @@ class SystemToolListResponse(BaseModel):
 
 class SystemToolDetailResponse(BaseModel):
     """系统工具详情响应"""
+    model_config = ConfigDict(populate_by_name=True)
+
     success: bool = Field(..., description="是否成功")
     name: str = Field(..., description="工具名称")
-    schema: Dict[str, Any] = Field(..., description="工具的 OpenAI Function Schema")
+    tool_schema: Dict[str, Any] = Field(
+        ...,
+        alias="schema",
+        serialization_alias="schema",
+        description="工具的 OpenAI Function Schema",
+    )
     error: Optional[str] = Field(None, description="错误信息")

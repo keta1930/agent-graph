@@ -36,7 +36,7 @@ class TaskService:
                 raise Exception("任务管理器未初始化")
 
             # 转换为字典格式
-            task_data = task_create.dict()
+            task_data = task_create.model_dump()
 
             # 验证图是否存在（使用任务所属用户的user_id验证）
             graph_doc = await graph_service.get_graph(task_create.graph_name, user_id=task_data.get("user_id", user_id))

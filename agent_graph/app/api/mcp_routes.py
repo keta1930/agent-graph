@@ -43,7 +43,7 @@ async def get_mcp_config(current_user: CurrentUser = Depends(get_current_user)):
 async def update_mcp_config(request: MCPConfigWithVersion, current_user: CurrentUser = Depends(get_current_user)):
     """更新团队MCP配置并重新连接服务器"""
     try:
-        config_dict = request.config.dict()
+        config_dict = request.config.model_dump()
         expected_version = request.version
 
         # 获取当前配置以保留provider信息
@@ -153,7 +153,7 @@ async def add_mcp_server(request: MCPServerAddRequest, current_user: CurrentUser
                 duplicate_servers.append(server_name)
             else:
                 try:
-                    normalized_config = server_config.dict()
+                    normalized_config = server_config.model_dump()
                     # 添加provider信息
                     normalized_config['provider_user_id'] = current_user.user_id
                     normalized_config['created_at'] = datetime.now().isoformat()

@@ -192,7 +192,7 @@ async def create_agent(
 
         # 使用 agent_service 创建 Agent（包含记忆文档创建）
         result = await agent_service.create_agent(
-            agent_config=request.agent_config.dict(),
+            agent_config=request.agent_config.model_dump(),
             user_id=user_id
         )
 
@@ -294,7 +294,7 @@ async def update_agent(
         # 使用 agent_service 更新 Agent
         result = await agent_service.update_agent(
             agent_name=agent_name,
-            agent_config=request.agent_config.dict(),
+            agent_config=request.agent_config.model_dump(),
             user_id=user_id
         )
 

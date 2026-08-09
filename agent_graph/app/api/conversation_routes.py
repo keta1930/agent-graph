@@ -396,7 +396,7 @@ async def update_input_config(
         # 调用mongodb_client更新输入配置
         success = await mongodb_client.update_input_config(
             conversation_id=conversation_id,
-            input_config=request.input_config.dict(exclude_none=True),
+            input_config=request.input_config.model_dump(exclude_none=True),
             user_id=current_user.user_id
         )
 
@@ -410,7 +410,7 @@ async def update_input_config(
             "status": "success",
             "message": "输入配置更新成功",
             "conversation_id": conversation_id,
-            "input_config": request.input_config.dict(exclude_none=True)
+            "input_config": request.input_config.model_dump(exclude_none=True)
         }
 
     except HTTPException:

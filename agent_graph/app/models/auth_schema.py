@@ -2,7 +2,7 @@
 认证相关的Pydantic Schema模型
 """
 from typing import Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from datetime import datetime
 
 
@@ -17,7 +17,7 @@ class UserRegisterRequest(BaseModel):
     password: str = Field(..., description="密码", min_length=8)
     language: str = Field(default="en", description="语言偏好: en（英语）或 zh（中文）")
 
-    @validator('user_id')
+    @field_validator('user_id')
     def validate_user_id(cls, v):
         """验证用户名格式"""
         if not v.strip():
@@ -27,14 +27,14 @@ class UserRegisterRequest(BaseModel):
             raise ValueError('用户名只能包含字母、数字、下划线和连字符')
         return v.strip()
 
-    @validator('password')
+    @field_validator('password')
     def validate_password(cls, v):
         """验证密码强度"""
         if len(v) < 8:
             raise ValueError('密码长度至少为8个字符')
         return v
 
-    @validator('language')
+    @field_validator('language')
     def validate_language(cls, v):
         """验证语言偏好"""
         v = v.lower().strip()
@@ -110,12 +110,12 @@ class UpdatePasswordRequest(BaseModel):
     old_password: str = Field(..., description="旧密码")
     new_password: str = Field(..., description="新密码", min_length=8)
 
-    @validator('new_password')
-    def validate_new_password(cls, v, values):
+    @field_validator('new_password')
+    def validate_new_password(cls, v, info: ValidationInfo):
         """验证新密码"""
         if len(v) < 8:
             raise ValueError('密码长度至少为8个字符')
-        if 'old_password' in values and v == values['old_password']:
+        if v == info.data.get('old_password'):
             raise ValueError('新密码不能与旧密码相同')
         return v
 
@@ -176,7 +176,7 @@ class InviteCodeCreateRequest(BaseModel):
     expires_at: Optional[datetime] = Field(None, description="过期时间（不填表示永不过期）")
     description: Optional[str] = Field(None, description="描述信息", max_length=200)
 
-    @validator('expires_at')
+    @field_validator('expires_at')
     def validate_expires_at(cls, v):
         """验证过期时间必须在未来"""
         if v is not None:
@@ -219,7 +219,7 @@ class TeamSettingsUpdateRequest(BaseModel):
     """
     team_name: str = Field(..., description="团队名称", min_length=1, max_length=100)
 
-    @validator('team_name')
+    @field_validator('team_name')
     def validate_team_name(cls, v):
         """验证团队名称"""
         if not v.strip():

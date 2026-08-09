@@ -1,15 +1,16 @@
+name: agent_graph_services
+
 services:
   # MongoDB
   mongodb:
     image: mongodb/mongodb-community-server:8.2.1-ubuntu2204-20251113T064937Z
-    container_name: mongodb
-    restart: "no"
+    restart: unless-stopped
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
-      MONGO_INITDB_DATABASE: ${MONGO_DATABASE}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in .env}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:?Set MONGO_DATABASE in .env}
     ports:
-      - "127.0.0.1:${MONGO_PORT}:27017"
+      - "127.0.0.1:${MONGO_PORT:?Set MONGO_PORT in .env}:27017"
     volumes:
       - mongodb_data:/data/db
       - mongodb_config:/data/configdb
@@ -38,21 +39,21 @@ services:
 
   # MongoDB Express
   mongo-express:
-    image: mongo-express:latest
-    container_name: mongo-express
-    restart: "no"
+    image: mongo-express:1.0.2-20-alpine3.19
+    restart: unless-stopped
     ports:
-      - "127.0.0.1:${MONGO_EXPRESS_PORT}:8081"
+      - "127.0.0.1:${MONGO_EXPRESS_PORT:?Set MONGO_EXPRESS_PORT in .env}:8081"
     environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_ROOT_USERNAME}
-      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_ROOT_PASSWORD}
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in .env}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in .env}
       ME_CONFIG_MONGODB_SERVER: mongodb
-      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME}
-      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD}
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:?Set MONGO_EXPRESS_USERNAME in .env}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:?Set MONGO_EXPRESS_PASSWORD in .env}
       ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
       ME_CONFIG_OPTIONS_EDITORTHEME: ambiance
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
     networks:
       - agent_graph_network
     logging:
@@ -72,14 +73,13 @@ services:
   # MinIO
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    container_name: minio
-    restart: "no"
+    restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
     ports:
-      - "127.0.0.1:${MINIO_API_PORT}:9000"     # API port
-      - "127.0.0.1:${MINIO_CONSOLE_PORT}:9001" # Console port
+      - "127.0.0.1:${MINIO_API_PORT:?Set MINIO_API_PORT in .env}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:?Set MINIO_CONSOLE_PORT in .env}:9001"
     volumes:
       - minio_data:/data
     networks:

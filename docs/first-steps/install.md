@@ -21,12 +21,11 @@ git clone https://github.com/keta1930/agent-graph.git
 cd agent-graph
 ```
 
-### 2. Configure Docker Services
+### 2. Configure Environment
 
-Docker services provide MongoDB database and MinIO object storage.
+A single `.env` file in the project root configures both the backend and the Docker services (MongoDB and MinIO).
 
 ```bash
-cd docker/agent_graph_services
 cp .env.example .env
 ```
 
@@ -34,73 +33,83 @@ Edit the `.env` file with your configuration:
 
 | Configuration | Description | Example |
 |---------------|-------------|---------|
-| MONGO_ROOT_USERNAME | MongoDB admin username | admin |
-| MONGO_ROOT_PASSWORD | MongoDB admin password | strongpassword123 |
-| MONGO_DATABASE | MongoDB database name | agent-graph |
+| PORT | FastAPI listen port | 20050 |
+| PUBLIC_API_BASE_URL | Externally reachable backend URL used by generated integrations | http://127.0.0.1:20050 |
+| MCP_CLIENT_HOST | Internal MCP client bind address | 127.0.0.1 |
+| MCP_CLIENT_PORT | Internal MCP client port | 20052 |
+| FRONTEND_HOST | Vite development/preview bind address | 0.0.0.0 |
+| FRONTEND_PORT | Vite development/preview port | 20051 |
+| BACKEND_PROXY_HOST | Backend host used by the Vite development proxy | 127.0.0.1 |
+| FRONTEND_ALLOWED_HOSTS | Hosts accepted by the Vite development server | localhost,127.0.0.1 |
+| CORS_ORIGINS | Allowed browser origins (comma-separated) | http://localhost:20051 |
+| MONGODB_URL | MongoDB connection URL used by backend (credentials must match MONGO_ROOT_*) | mongodb://admin:strongpassword123@localhost:20040/ |
+| MONGODB_DB | Backend MongoDB database name | agent-graph |
+| MONGO_ROOT_USERNAME | MongoDB admin username (container init) | admin |
+| MONGO_ROOT_PASSWORD | MongoDB admin password (container init) | strongpassword123 |
+| MONGO_DATABASE | Database created on first MongoDB init | agent-graph |
 | MONGO_PORT | MongoDB service port | 20040 |
 | MONGO_EXPRESS_PORT | Database management UI port | 20041 |
 | MONGO_EXPRESS_USERNAME | Mongo Express web UI username | admin |
 | MONGO_EXPRESS_PASSWORD | Mongo Express web UI password | strongpassword123 |
-| MINIO_ROOT_USER | MinIO admin username | minioadmin |
-| MINIO_ROOT_PASSWORD | MinIO admin password | minioadmin123 |
+| MINIO_ENDPOINT | MinIO endpoint used by backend (host:port) | localhost:20042 |
+| MINIO_ACCESS_KEY | MinIO access key (must match MINIO_ROOT_USER) | minioadmin |
+| MINIO_SECRET_KEY | MinIO secret key (must match MINIO_ROOT_PASSWORD) | minioadmin123 |
+| MINIO_ROOT_USER | MinIO admin username (container init) | minioadmin |
+| MINIO_ROOT_PASSWORD | MinIO admin password (container init) | minioadmin123 |
 | MINIO_API_PORT | MinIO API port | 20042 |
 | MINIO_CONSOLE_PORT | MinIO web console port | 20043 |
 | MINIO_SECURE | Enable TLS for the MinIO client | false |
-| JWT_SECRET_KEY | Security key for authentication | Generate using script |
+| JWT_SECRET_KEY | Authentication secret (at least 32 characters) | Generate using script |
 | JWT_ALGORITHM | JWT signing algorithm | HS256 |
 | JWT_ACCESS_TOKEN_EXPIRE_MINUTES | Access Token lifetime in minutes | 15 |
 | JWT_REFRESH_TOKEN_EXPIRE_DAYS | Refresh Token lifetime in days | 7 |
 | ADMIN_USERNAME | Super admin username | admin |
-| ADMIN_PASSWORD | Super admin password | securepassword |
+| ADMIN_PASSWORD | Super admin password (at least 12 characters) | securepassword |
 
-**Generate JWT Secret Key:** Run `python agent_graph/scripts/generate_jwt_secret.py` to generate a secure JWT secret key.
+Values intentionally left blank in `.env.example` are required. Generate `JWT_SECRET_KEY` with `python agent_graph/scripts/generate_jwt_secret.py`, and set unique passwords before starting any service.
+
+> **Note:** Keep `PORT` aligned with `PUBLIC_API_BASE_URL`, `FRONTEND_PORT` aligned with `CORS_ORIGINS`, and backend storage endpoints aligned with the corresponding Docker credentials and ports.
 
 ### 3. Start Docker Services
 
 ```bash
-docker-compose up -d
+docker compose --env-file .env -f docker/docker-compose.yml up -d
 ```
 
-Verify services are running:
+With the example ports, verify services are running:
 
 - MongoDB Express: http://localhost:20041
 - MinIO Console: http://localhost:20043
 
 ### 4. Deploy Backend
 
-Navigate back to the project root and install backend dependencies:
+Install backend dependencies:
 
 **Using uv (Recommended):**
 
 ```bash
-cd ../..  # Return to project root
 uv sync
 
-# Start backend service
-cd agent_graph
-uv run python main.py
+uv run --env-file .env fastapi run
 ```
 
 **Using pip:**
 
 ```bash
-cd ../..  # Return to project root
 pip install -r requirements.txt
 
-# Start backend service
-cd agent_graph
-python main.py
+dotenv -f .env run -- fastapi run
 ```
 
 For background execution, use:
 
 ```bash
-nohup python main.py > app.log 2>&1 &
+nohup uv run --env-file .env fastapi run > app.log 2>&1 &
 ```
 
 ### 5. Access the Application
 
-Open your browser and navigate to:
+Open the URL configured by `PUBLIC_API_BASE_URL` (the example value is):
 
 **http://localhost:20050**
 
@@ -135,7 +144,7 @@ After installation, verify all services are running correctly:
 | Docker services fail to start | Check ports are not already in use, verify Docker is running |
 | Backend connection error | Verify MongoDB and MinIO are running, check `.env` configuration |
 | Cannot login | Verify admin credentials in `.env` file match login attempt |
-| Backend port already in use | Change the port in `agent_graph/main.py` (default: 20050) |
+| Backend or frontend port already in use | Change `PORT` or `FRONTEND_PORT` in `.env`, then update the related URL/origin values |
 
 ## For Developers
 
@@ -155,7 +164,7 @@ npm install
 npm run dev
 ```
 
-The development server will start at http://localhost:20051 with hot-reload enabled.
+The development server uses `FRONTEND_HOST` and `FRONTEND_PORT` from the root `.env`.
 
 **Building Frontend:**
 
@@ -174,7 +183,7 @@ This creates optimized production files in `agent_graph/dist/` which will be ser
 For production environments, consider these additional steps:
 
 1. **Security:**
-   - Change all default passwords in `.env`
+   - Set every credential that is blank in `.env.example` to a unique value
    - Use a strong JWT secret key (minimum 32 characters)
    - Configure firewall rules to limit access
    - Set up HTTPS with a reverse proxy (nginx/Caddy)

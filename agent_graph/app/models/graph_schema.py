@@ -92,6 +92,15 @@ class GraphInput(BaseModel):
     background: bool = Field(default=False, description="是否后台执行，默认为False使用SSE模式")
 
 
+class MCPGenerationResponse(BaseModel):
+    """描述 Graph 对应的 MCP server 脚本。"""
+
+    graph_name: str
+    sequential_script: str | None = None
+    default_script: str | None = None
+    script: str | None = None
+    error: str | None = None
+
 class GraphFilePath(BaseModel):
     file_path: str
 

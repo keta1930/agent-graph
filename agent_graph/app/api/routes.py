@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 
-# 导入所有子路由模块
 from .auth_routes import router as auth_router
 from .admin_routes import router as admin_router
 from .conversation_routes import router as conversation_router
@@ -22,15 +21,11 @@ from .conversation_share_routes import router as conversation_share_router
 from .project_routes import router as project_router
 from .project_file_routes import router as project_file_router
 
-# 创建主路由器
-router = APIRouter()
+router = APIRouter(prefix="/api")
 
-# 包含所有子路由
-# 认证和管理路由（无需前缀，已在各自路由中定义）
 router.include_router(auth_router)
 router.include_router(admin_router)
 
-# 其他业务路由
 router.include_router(conversation_router)
 router.include_router(graph_import_export_router)
 router.include_router(mcp_router)

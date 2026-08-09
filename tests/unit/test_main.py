@@ -11,6 +11,43 @@ app = main.app
 client = TestClient(app)
 
 
+def test_health_response_is_typed():
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "healthy",
+        "app_name": "Agent-Graph",
+        "version": "3.0.0",
+    }
+
+
+def test_unknown_api_route_returns_json_404():
+    response = client.get(
+        "/api/route-that-does-not-exist",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/json"
+    assert response.json() == {"detail": "Not Found"}
+
+
+def test_frontend_fallback_only_handles_html_navigation():
+    api_response = client.get(
+        "/dashboard",
+        headers={"Accept": "application/json"},
+    )
+    browser_response = client.get(
+        "/dashboard",
+        headers={"Accept": "text/html"},
+    )
+
+    assert api_response.status_code == 404
+    assert browser_response.status_code == 200
+    assert browser_response.headers["content-type"].startswith("text/html")
+
+
 def test_lifespan_initializes_external_resources(monkeypatch):
     ensure_directories = Mock()
     initialize_minio = Mock()

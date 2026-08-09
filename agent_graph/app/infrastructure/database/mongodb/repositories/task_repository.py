@@ -2,7 +2,7 @@ import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from bson import ObjectId
-from app.utils.permission_utils import verify_resource_ownership
+from agent_graph.app.utils.permission_utils import verify_resource_ownership
 
 logger = logging.getLogger(__name__)
 

@@ -4,9 +4,9 @@
 """
 import logging
 from fastapi import APIRouter, HTTPException, Depends, Path
-from app.models.auth_schema import CurrentUser
-from app.auth.dependencies import get_current_user
-from app.models.conversation_file_schema import (
+from agent_graph.app.models.auth_schema import CurrentUser
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.conversation_file_schema import (
     FileListResponse,
     FileDetailResponse,
     FileVersionResponse,
@@ -15,8 +15,8 @@ from app.models.conversation_file_schema import (
     FileOperationResponse,
     DeleteFileResponse
 )
-from app.models.project_schema import PushFileToProjectRequest
-from app.services.project import project_document_service
+from agent_graph.app.models.project_schema import PushFileToProjectRequest
+from agent_graph.app.services.project import project_document_service
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
 import json
 from typing import List, Dict, Any
-from app.infrastructure.storage.object_storage import minio_client
+from agent_graph.app.infrastructure.storage.object_storage import minio_client
 from .base import BasePreviewReader
 
 

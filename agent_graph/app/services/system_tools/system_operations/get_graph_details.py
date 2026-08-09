@@ -68,8 +68,8 @@ async def handler(user_id: str, graph_name: str, **kwargs) -> Dict[str, Any]:
         }
     """
     try:
-        from app.services.graph.graph_service import graph_service
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.graph.graph_service import graph_service
+        from agent_graph.app.services.system_tools.registry import get_current_language
 
         # 获取当前语言
         language = get_current_language()
@@ -100,7 +100,7 @@ async def handler(user_id: str, graph_name: str, **kwargs) -> Dict[str, Any]:
         logger.error(f"get_graph_details 执行失败 (graph_name={graph_name}): {str(e)}")
         
         # 根据语言返回错误消息
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         if language == "en":

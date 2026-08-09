@@ -5,8 +5,8 @@ Prompt 服务主文件
 import logging
 from typing import Dict, Any, List
 
-from app.infrastructure.database.mongodb import mongodb_client
-from app.models.prompt_schema import (
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.models.prompt_schema import (
     PromptCreate, PromptUpdate, PromptImportByFileRequest,
     PromptExportRequest, PromptBatchDeleteRequest
 )

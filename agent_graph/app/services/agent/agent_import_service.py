@@ -5,10 +5,10 @@ Agent 导入服务
 import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
-from app.services.agent.importers import JSONImporter, JSONLImporter, ExcelImporter, ParquetImporter
-from app.services.agent.import_report_generator import ImportReportGenerator
-from app.services.agent.agent_service import agent_service
-from app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.services.agent.importers import JSONImporter, JSONLImporter, ExcelImporter, ParquetImporter
+from agent_graph.app.services.agent.import_report_generator import ImportReportGenerator
+from agent_graph.app.services.agent.agent_service import agent_service
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
 
 logger = logging.getLogger(__name__)
 

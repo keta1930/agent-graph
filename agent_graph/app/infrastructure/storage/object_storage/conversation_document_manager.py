@@ -6,9 +6,9 @@
 import logging
 from typing import Optional, Dict, Any, List
 from io import BytesIO
-from app.core.config import settings
+from agent_graph.app.core.config import settings
 from minio.versioningconfig import VersioningConfig, ENABLED
-from app.infrastructure.storage.object_storage.minio_client import minio_client
+from agent_graph.app.infrastructure.storage.object_storage.minio_client import minio_client
 
 logger = logging.getLogger(__name__)
 

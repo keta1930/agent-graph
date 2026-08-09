@@ -3,15 +3,15 @@ import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import Dict, List, Any
-from app.infrastructure.storage.file_storage import FileManager
-from app.services.mcp.mcp_service import mcp_service
-from app.infrastructure.database.mongodb import mongodb_client
-from app.models.mcp_schema import (
+from agent_graph.app.infrastructure.storage.file_storage import FileManager
+from agent_graph.app.services.mcp.mcp_service import mcp_service
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.models.mcp_schema import (
     MCPToolRegistration, MCPToolTestRequest, MCPToolTestResponse,
     MCPConfigWithVersion, MCPServerAddRequest, MCPServerRemoveRequest
 )
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
 
 logger = logging.getLogger(__name__)
 

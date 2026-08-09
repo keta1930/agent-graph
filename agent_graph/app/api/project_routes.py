@@ -4,7 +4,7 @@ Project API路由
 """
 import logging
 from fastapi import APIRouter, HTTPException, status, Depends
-from app.models.project_schema import (
+from agent_graph.app.models.project_schema import (
     CreateProjectRequest,
     UpdateProjectRequest,
     ProjectListResponse,
@@ -12,9 +12,9 @@ from app.models.project_schema import (
     ProjectOperationResponse,
     MoveConversationToProjectRequest
 )
-from app.services.project import project_service
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.services.project import project_service
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
 
 logger = logging.getLogger(__name__)
 

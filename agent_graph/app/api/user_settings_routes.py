@@ -1,10 +1,10 @@
 import logging
 from fastapi import APIRouter, HTTPException, status, Depends
 
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import MessageResponse
-from app.infrastructure.database.mongodb import mongodb_client
-from app.services.model.model_service import model_service
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import MessageResponse
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.services.model.model_service import model_service
 
 logger = logging.getLogger(__name__)
 

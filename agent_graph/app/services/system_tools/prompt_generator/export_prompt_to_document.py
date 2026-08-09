@@ -4,8 +4,8 @@
 """
 import logging
 from typing import Dict, Any
-from app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
-from app.infrastructure.database.mongodb.client import mongodb_client
+from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
+from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +76,10 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
         }
     """
     try:
-        from app.services.prompt.prompt_service import prompt_service
+        from agent_graph.app.services.prompt.prompt_service import prompt_service
         
         # 获取当前用户语言
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         # 验证必需参数
@@ -230,7 +230,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"export_prompt_to_document 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         if language == "en":

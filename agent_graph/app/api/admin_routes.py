@@ -6,7 +6,7 @@
 import logging
 from fastapi import APIRouter, HTTPException, status, Depends
 
-from app.models.auth_schema import (
+from agent_graph.app.models.auth_schema import (
     UserListResponse,
     User,
     InviteCodeListResponse,
@@ -17,11 +17,11 @@ from app.models.auth_schema import (
     TeamSettingsUpdateRequest,
     MessageResponse
 )
-from app.auth.dependencies import require_admin
-from app.services.user.user_service import UserService
-from app.services.user.invite_code_service import InviteCodeService
-from app.services.user.team_service import TeamService
-from app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.auth.dependencies import require_admin
+from agent_graph.app.services.user.user_service import UserService
+from agent_graph.app.services.user.invite_code_service import InviteCodeService
+from agent_graph.app.services.user.team_service import TeamService
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
 
 logger = logging.getLogger(__name__)
 

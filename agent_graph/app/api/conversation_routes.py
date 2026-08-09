@@ -2,16 +2,16 @@ import logging
 from datetime import datetime
 from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, status, Depends
-from app.infrastructure.database.mongodb import mongodb_client
-from app.infrastructure.storage.object_storage.conversation_image_manager import conversation_image_manager
-from app.models.conversation_schema import (
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.infrastructure.storage.object_storage.conversation_image_manager import conversation_image_manager
+from agent_graph.app.models.conversation_schema import (
     ConversationListItem, ConversationListResponse, ConversationDetailResponse,
     UpdateConversationTitleRequest, UpdateConversationTagsRequest,
     ConversationCompactRequest, ConversationCompactResponse,
     TokenUsage, UpdateConversationStatusRequest, UpdateInputConfigRequest
 )
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
 
 logger = logging.getLogger(__name__)
 
@@ -445,7 +445,7 @@ async def compact_conversation(
             )
 
         # 验证模型名称
-        from app.services.model.model_service import model_service
+        from agent_graph.app.services.model.model_service import model_service
         model_config = await model_service.get_model(request.model_name, current_user.user_id)
         if not model_config:
             raise HTTPException(
@@ -474,8 +474,8 @@ async def compact_conversation(
             async def summarize_tool_content(content: str) -> Dict[str, Any]:
                 """使用模型总结工具结果进行压缩内容"""
                 try:
-                    from app.utils.text_tool import detect_language
-                    from app.services.conversation.prompts import get_summarize_prompt
+                    from agent_graph.app.utils.text_tool import detect_language
+                    from agent_graph.app.services.conversation.prompts import get_summarize_prompt
 
                     language = detect_language(content)
                     prompt_template = get_summarize_prompt(language)

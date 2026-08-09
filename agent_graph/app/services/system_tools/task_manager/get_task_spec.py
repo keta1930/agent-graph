@@ -53,11 +53,11 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
     """
     try:
         # 获取当前用户语言
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         # 获取所有可用的图名称
-        from app.services.graph.graph_service import graph_service
+        from agent_graph.app.services.graph.graph_service import graph_service
         
         graphs_result = await graph_service.list_graphs(user_id)
         graph_names = []
@@ -95,7 +95,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"get_task_spec 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         if language == "en":

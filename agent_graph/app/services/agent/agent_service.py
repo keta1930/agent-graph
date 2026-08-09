@@ -5,11 +5,11 @@ Agent 服务
 import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
-from app.infrastructure.database.mongodb import mongodb_client
-from app.services.agent.agent_stream_executor import AgentStreamExecutor
-from app.services.model.model_service import model_service
-from app.services.mcp.mcp_service import mcp_service
-from app.services.system_tools import get_tool_names
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.services.agent.agent_stream_executor import AgentStreamExecutor
+from agent_graph.app.services.model.model_service import model_service
+from agent_graph.app.services.mcp.mcp_service import mcp_service
+from agent_graph.app.services.system_tools import get_tool_names
 
 logger = logging.getLogger(__name__)
 

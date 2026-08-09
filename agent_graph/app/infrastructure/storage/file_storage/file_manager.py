@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import logging
 import subprocess
-from app.core.config import settings
+from agent_graph.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 

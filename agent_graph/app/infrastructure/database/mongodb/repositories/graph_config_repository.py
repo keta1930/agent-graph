@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
-from app.utils.permission_utils import can_access_resource, verify_resource_ownership
+from agent_graph.app.utils.permission_utils import can_access_resource, verify_resource_ownership
 
 logger = logging.getLogger(__name__)
 

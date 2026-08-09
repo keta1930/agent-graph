@@ -2,14 +2,14 @@ import logging
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse, JSONResponse, Response
 from typing import Dict, List, Any
-from app.services.model.model_service import model_service
-from app.services.graph.graph_service import graph_service
-from app.templates.flow_diagram import FlowDiagram
-from app.utils.sse_helper import SSEHelper
-from app.models.graph_schema import GraphConfig, GraphInput
-from app.infrastructure.database.mongodb import mongodb_client
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.services.model.model_service import model_service
+from agent_graph.app.services.graph.graph_service import graph_service
+from agent_graph.app.templates.flow_diagram import FlowDiagram
+from agent_graph.app.utils.sse_helper import SSEHelper
+from agent_graph.app.models.graph_schema import GraphConfig, GraphInput
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["graph"])

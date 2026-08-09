@@ -5,7 +5,7 @@ Handoffs 工具执行器
 """
 import logging
 from typing import Dict, Any
-from app.services.tool_execution.base_executor import BaseToolExecutor
+from agent_graph.app.services.tool_execution.base_executor import BaseToolExecutor
 
 logger = logging.getLogger(__name__)
 

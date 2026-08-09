@@ -8,7 +8,7 @@ import logging
 from typing import Optional, List, Dict, Any
 from minio import Minio
 from minio.error import S3Error
-from app.core.config import settings
+from agent_graph.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 

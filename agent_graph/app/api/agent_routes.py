@@ -8,13 +8,13 @@ from typing import List, Optional
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, FileResponse
-from app.infrastructure.database.mongodb.client import mongodb_client
-from app.services.agent.agent_stream_executor import AgentStreamExecutor
-from app.services.agent.agent_import_service import agent_import_service
-from app.services.agent.agent_service import agent_service
-from app.services.agent.agent_run_service import agent_run_service
-from app.utils.sse_helper import TrajectoryCollector
-from app.models.agent_schema import (
+from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+from agent_graph.app.services.agent.agent_stream_executor import AgentStreamExecutor
+from agent_graph.app.services.agent.agent_import_service import agent_import_service
+from agent_graph.app.services.agent.agent_service import agent_service
+from agent_graph.app.services.agent.agent_run_service import agent_run_service
+from agent_graph.app.utils.sse_helper import TrajectoryCollector
+from agent_graph.app.models.agent_schema import (
     CreateAgentRequest,
     UpdateAgentRequest,
     AgentListItem,
@@ -24,8 +24,8 @@ from app.models.agent_schema import (
     AgentInCategoryItem,
     AgentInCategoryResponse
 )
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
 
 logger = logging.getLogger(__name__)
 

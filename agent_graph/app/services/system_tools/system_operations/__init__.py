@@ -2,7 +2,7 @@
 系统运营工具集
 提供系统级别的查询和管理功能
 """
-from app.services.system_tools.registry import register_system_tool
+from agent_graph.app.services.system_tools.registry import register_system_tool
 
 # 导入所有工具
 from . import list_all_models

@@ -7,14 +7,14 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from app.api.routes import router
-from app.services.mcp.mcp_service import mcp_service
-from app.services.model.model_service import model_service
-from app.services.graph.graph_service import graph_service
-from app.infrastructure.database.mongodb import mongodb_client
-from app.infrastructure.storage.file_storage import FileManager
-from app.core.config import settings
-from app.core.initialization import initialize_system
+from agent_graph.app.api.routes import router
+from agent_graph.app.services.mcp.mcp_service import mcp_service
+from agent_graph.app.services.model.model_service import model_service
+from agent_graph.app.services.graph.graph_service import graph_service
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.infrastructure.storage.file_storage import FileManager
+from agent_graph.app.core.config import settings
+from agent_graph.app.core.initialization import initialize_system
 
 # 配置日志
 logging.basicConfig(

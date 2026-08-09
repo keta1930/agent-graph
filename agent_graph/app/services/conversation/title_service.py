@@ -2,10 +2,10 @@ import asyncio
 import logging
 from typing import Dict, List, Tuple
 
-from app.infrastructure.database.mongodb.client import mongodb_client
-from app.utils.text_parser import parse_title_and_tags_response
-from app.services.model.model_service import model_service
-from app.services.conversation.prompts import get_title_prompt
+from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+from agent_graph.app.utils.text_parser import parse_title_and_tags_response
+from agent_graph.app.services.model.model_service import model_service
+from agent_graph.app.services.conversation.prompts import get_title_prompt
 
 logger = logging.getLogger(__name__)
 

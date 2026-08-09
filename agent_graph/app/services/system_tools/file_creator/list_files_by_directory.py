@@ -47,8 +47,8 @@ TOOL_SCHEMA = {
 async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
     """列出指定目录下的文件"""
     try:
-        from app.infrastructure.database.mongodb.client import mongodb_client
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.services.system_tools.registry import get_current_language
 
         # 获取当前用户语言
         language = get_current_language()
@@ -76,7 +76,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"list_files_by_directory 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         if language == "en":

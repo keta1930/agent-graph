@@ -6,8 +6,8 @@ import signal
 import subprocess
 import sys
 import aiohttp
-from app.core.config import settings
-from app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.core.config import settings
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -53,17 +53,8 @@ class MCPClientManager:
 
     async def _start_new_client(self, config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """启动新的客户端进程"""
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
-        client_script = os.path.join(project_root, "mcp_client.py")
-
-        if not os.path.exists(client_script):
-            error_msg = f"找不到MCP Client脚本: {client_script}"
-            logger.error(error_msg)
-            return {"status": {"error": error_msg}}
-
         python_executable = sys.executable
-        full_command = [python_executable, client_script]
+        full_command = [python_executable, "-m", "agent_graph.mcp_client"]
         logger.info(f"启动MCP Client，完整命令: {' '.join(full_command)}")
 
         stdout_file = os.path.join(str(settings.AGENT_GRAPH_DIR), "mcp_client_stdout.log")

@@ -11,7 +11,7 @@ from jose import JWTError, jwt
 from fastapi import HTTPException, status
 import secrets
 
-from app.core.config import settings
+from agent_graph.app.core.config import settings
 
 
 def create_tokens(user_id: str, role: str) -> Tuple[str, str, str, datetime]:

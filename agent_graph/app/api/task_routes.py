@@ -3,11 +3,11 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
-from app.services.task.task_service import task_service
-from app.services.task.task_scheduler import task_scheduler
-from app.models.task_schema import TaskCreate, TaskStatusUpdate, TaskSummary, Task, TaskStatus
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.services.task.task_service import task_service
+from agent_graph.app.services.task.task_scheduler import task_scheduler
+from agent_graph.app.models.task_schema import TaskCreate, TaskStatusUpdate, TaskSummary, Task, TaskStatus
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
 
 logger = logging.getLogger(__name__)
 

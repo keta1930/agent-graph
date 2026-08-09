@@ -6,7 +6,7 @@ MCP 工具执行器
 import json
 import logging
 from typing import Dict, Any, Optional, List
-from app.services.tool_execution.base_executor import BaseToolExecutor
+from agent_graph.app.services.tool_execution.base_executor import BaseToolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class MCPToolExecutor(BaseToolExecutor):
     def mcp_service(self):
         """延迟获取 MCP 服务实例"""
         if self._mcp_service is None:
-            from app.services.mcp.mcp_service import mcp_service
+            from agent_graph.app.services.mcp.mcp_service import mcp_service
             self._mcp_service = mcp_service
         return self._mcp_service
 

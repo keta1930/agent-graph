@@ -5,7 +5,7 @@
 import logging
 import json
 from typing import Dict, Any
-from app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
+from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
     """
     try:
         # 从上下文获取用户语言
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         # 验证必需参数
@@ -154,7 +154,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
             }
         
         # 使用 graph_service 验证和保存配置
-        from app.services.graph.graph_service import graph_service
+        from agent_graph.app.services.graph.graph_service import graph_service
         
         # 验证 Graph 配置
         logger.info(f"正在验证Graph配置: {graph_name}")
@@ -199,7 +199,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"register_graph_from_document 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         if language == "en":

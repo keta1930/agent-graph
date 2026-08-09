@@ -115,9 +115,9 @@ async def handler(
         - Dict: 最终结果
     """
     try:
-        from app.services.agent.agent_stream_executor import AgentStreamExecutor
-        from app.infrastructure.database.mongodb.client import mongodb_client
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.agent.agent_stream_executor import AgentStreamExecutor
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.services.system_tools.registry import get_current_language
 
         # 获取当前语言
         language = get_current_language()
@@ -194,7 +194,7 @@ async def handler(
         logger.error(f"agent_task_executor 流式执行失败: {str(e)}")
         
         # 根据语言返回错误消息
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         error_msg = "Failed to execute Agent task" if language == "en" else "执行 Agent 任务失败"
@@ -234,8 +234,8 @@ async def execute_agent_task_stream(
         - Dict: 最终结果
     """
     try:
-        from app.services.agent.sub_agent_task_service import sub_agent_task_service
-        from app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.services.agent.sub_agent_task_service import sub_agent_task_service
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
 
         # 检查 task 是否已存在
         task_history = await get_task_history(conversation_id, task_id)
@@ -295,7 +295,7 @@ async def execute_agent_task_stream(
                 final_result = item
 
         if not final_result:
-            from app.services.system_tools.registry import get_current_language
+            from agent_graph.app.services.system_tools.registry import get_current_language
             language = get_current_language()
             error_msg = "Execution failed, no result received" if language == "en" else "执行失败，未收到结果"
             
@@ -376,7 +376,7 @@ async def build_task_messages(
     Returns:
         消息列表
     """
-    from app.infrastructure.database.mongodb.client import mongodb_client
+    from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
 
     # 获取 Agent 配置
     agent = await mongodb_client.agent_repository.get_agent(agent_name, user_id)
@@ -387,7 +387,7 @@ async def build_task_messages(
     agent_config = agent.get("agent_config", {})
     instruction = agent_config.get("instruction", "")
 
-    from app.services.system_tools.registry import get_current_language
+    from agent_graph.app.services.system_tools.registry import get_current_language
     language = get_current_language()
 
     # 构建用户消息
@@ -434,7 +434,7 @@ async def get_task_history(
         历史消息列表
     """
     try:
-        from app.services.agent.sub_agent_task_service import sub_agent_task_service
+        from agent_graph.app.services.agent.sub_agent_task_service import sub_agent_task_service
 
         history = await sub_agent_task_service.get_task_history(
             conversation_id=conversation_id,

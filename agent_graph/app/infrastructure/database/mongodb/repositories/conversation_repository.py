@@ -767,7 +767,7 @@ class ConversationRepository:
                 return {"status": "error", "error": "目前仅支持 Agent 对话的压缩"}
 
             # 获取 agent_run 数据
-            from app.infrastructure.database.mongodb.repositories.agent_run_repository import AgentRunRepository
+            from agent_graph.app.infrastructure.database.mongodb.repositories.agent_run_repository import AgentRunRepository
             agent_run_repo = AgentRunRepository(self.db, self.db.agent_run)
 
             agent_run_doc = await agent_run_repo.get_agent_run(conversation_id)
@@ -1003,7 +1003,7 @@ class ConversationRepository:
             
             if conversation_type == "agent":
                 # 从agent_run集合获取数据
-                from app.infrastructure.database.mongodb.repositories.agent_run_repository import AgentRunRepository
+                from agent_graph.app.infrastructure.database.mongodb.repositories.agent_run_repository import AgentRunRepository
                 agent_run_repo = AgentRunRepository(self.db, self.db.agent_run)
                 agent_run_doc = await agent_run_repo.get_agent_run(conversation_id)
                 
@@ -1013,7 +1013,7 @@ class ConversationRepository:
                     
             elif conversation_type == "graph":
                 # 从graph_run集合获取数据
-                from app.infrastructure.database.mongodb.repositories.graph_run_repository import GraphRunRepository
+                from agent_graph.app.infrastructure.database.mongodb.repositories.graph_run_repository import GraphRunRepository
                 graph_run_repo = GraphRunRepository(self.db, self.db.graph_run, self)
                 graph_run_doc = await graph_run_repo.get_graph_run_conversation(conversation_id)
 

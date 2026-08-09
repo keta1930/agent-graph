@@ -72,10 +72,10 @@ async def handler(
         - Dict: 最终结果
     """
     try:
-        from app.services.agent.agent_stream_executor import AgentStreamExecutor
-        from app.infrastructure.database.mongodb.client import mongodb_client
-        from app.services.system_tools.registry import get_current_language
-        from app.services.agent.sub_agent_task_service import sub_agent_task_service
+        from agent_graph.app.services.agent.agent_stream_executor import AgentStreamExecutor
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.agent.sub_agent_task_service import sub_agent_task_service
 
         language = get_current_language()
 
@@ -205,7 +205,7 @@ async def handler(
 
     except Exception as e:
         logger.error(f"search_memory_with_agent 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
 
         error_msg = "Memory search failed" if language == "en" else "记忆搜索失败"

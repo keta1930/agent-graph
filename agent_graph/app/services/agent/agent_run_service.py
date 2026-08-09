@@ -8,9 +8,9 @@ import asyncio
 from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
 from fastapi import HTTPException, status, UploadFile
-from app.services.agent.file_handler import file_handler
-from app.infrastructure.database.mongodb.client import mongodb_client
-from app.services.conversation.title_service import generate_title_and_tags
+from agent_graph.app.services.agent.file_handler import file_handler
+from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+from agent_graph.app.services.conversation.title_service import generate_title_and_tags
 
 logger = logging.getLogger(__name__)
 

@@ -2,10 +2,10 @@ import asyncio
 import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
-from app.infrastructure.database.mongodb.repositories import TaskRepository
-from app.infrastructure.database.mongodb import mongodb_client
-from app.models.task_schema import TaskCreate
-from app.services.graph.graph_service import graph_service
+from agent_graph.app.infrastructure.database.mongodb.repositories import TaskRepository
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.models.task_schema import TaskCreate
+from agent_graph.app.services.graph.graph_service import graph_service
 
 logger = logging.getLogger(__name__)
 

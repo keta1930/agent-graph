@@ -12,7 +12,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
-from app.core.config import settings
+from agent_graph.app.core.config import settings
 
 # 配置日志
 logging.basicConfig(
@@ -103,7 +103,7 @@ class MCPServer:
     async def _start_ai_process(self) -> bool:
         """启动AI生成的MCP工具进程"""
         try:
-            from app.infrastructure.storage.file_storage import FileManager
+            from agent_graph.app.infrastructure.storage.file_storage import FileManager
             
             # 获取脚本路径和虚拟环境Python路径
             script_path = FileManager.get_mcp_tool_main_script(self.name)

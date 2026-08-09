@@ -5,8 +5,8 @@
 import logging
 import json
 from typing import Dict, Any
-from app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
-from app.infrastructure.database.mongodb.client import mongodb_client
+from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
+from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
 
 logger = logging.getLogger(__name__)
 
@@ -77,11 +77,11 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
     """
     try:
         # 从上下文获取用户语言
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         # 验证必需参数
-        from app.services.graph.graph_service import graph_service
+        from agent_graph.app.services.graph.graph_service import graph_service
         graph_name = kwargs.get("graph_name")
         conversation_id = kwargs.get("conversation_id")
         
@@ -244,7 +244,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"export_graph_to_document 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         if language == "en":

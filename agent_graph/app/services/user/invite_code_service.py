@@ -6,7 +6,7 @@
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime
-from app.utils.invite_code_generator import generate_invite_code
+from agent_graph.app.utils.invite_code_generator import generate_invite_code
 
 logger = logging.getLogger(__name__)
 

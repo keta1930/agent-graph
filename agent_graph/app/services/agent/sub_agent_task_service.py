@@ -13,7 +13,7 @@ class SubAgentTaskService:
 
     def __init__(self):
         """初始化 Sub Agent Task Service"""
-        from app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
         self.mongodb_client = mongodb_client
 
     async def add_task(

@@ -13,8 +13,10 @@ from agent_graph.app.services.model.model_service import model_service
 from agent_graph.app.services.graph.graph_service import graph_service
 from agent_graph.app.infrastructure.database.mongodb import mongodb_client
 from agent_graph.app.infrastructure.storage.file_storage import FileManager
-from agent_graph.app.core.config import settings
+from agent_graph.app.core.config import get_settings
 from agent_graph.app.core.initialization import initialize_system
+
+settings = get_settings()
 
 # 配置日志
 logging.basicConfig(
@@ -31,11 +33,11 @@ async def lifespan(app: FastAPI):
 
     try:
         # 1. 确保目录存在
-        logger.info(f"配置目录: {settings.AGENT_GRAPH_DIR}")
+        logger.info(f"配置目录: {settings.agent_graph_dir}")
         settings.ensure_directories()
 
         # 2. 连接MongoDB
-        await mongodb_client.initialize(settings.MONGODB_URL, settings.MONGODB_DB)
+        await mongodb_client.initialize(settings.mongodb_url, settings.mongodb_db)
         logger.info("MongoDB connected successfully")
 
         # 3. 执行系统初始化（创建超级管理员、团队）
@@ -96,7 +98,7 @@ app = FastAPI(
 # 添加CORS中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -121,7 +123,7 @@ app.include_router(router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "app_name": settings.APP_NAME, "version": settings.APP_VERSION}
+    return {"status": "healthy", "app_name": settings.app_name, "version": settings.app_version}
 
 
 # 静态文件服务配置
@@ -165,7 +167,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=20050,
+        port=settings.port,
         reload=False,
         log_level="info",
     )

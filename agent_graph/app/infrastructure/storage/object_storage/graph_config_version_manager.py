@@ -6,9 +6,11 @@ import json
 import logging
 from typing import Optional, Dict, Any
 from io import BytesIO
-from agent_graph.app.core.config import settings
+from agent_graph.app.core.config import get_settings
 from minio.versioningconfig import VersioningConfig, ENABLED
 from agent_graph.app.infrastructure.storage.object_storage.minio_client import minio_client
+
+settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +27,15 @@ class GraphConfigVersionManager:
         """确保 bucket 启用了版本控制"""
         try:
             versioning = minio_client._client.get_bucket_versioning(
-                settings.MINIO_BUCKET_NAME
+                settings.minio_bucket_name
             )
 
             if versioning.status != "Enabled":
                 minio_client._client.set_bucket_versioning(
-                    settings.MINIO_BUCKET_NAME,
+                    settings.minio_bucket_name,
                     VersioningConfig(ENABLED)
                 )
-                logger.info(f"✓ 已为 bucket '{settings.MINIO_BUCKET_NAME}' 启用版本控制")
+                logger.info(f"✓ 已为 bucket '{settings.minio_bucket_name}' 启用版本控制")
         except Exception as e:
             logger.error(f"启用版本控制失败: {e}")
 
@@ -70,7 +72,7 @@ class GraphConfigVersionManager:
 
             # 不使用 MinIO metadata，所有元数据都存储在 MongoDB 中
             result = minio_client._client.put_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 object_name=object_name,
                 data=content_stream,
                 length=len(content_bytes),
@@ -105,7 +107,7 @@ class GraphConfigVersionManager:
             object_name = self._get_object_name(graph_name, user_id)
 
             response = minio_client._client.get_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 object_name=object_name,
                 version_id=version_id
             )
@@ -139,7 +141,7 @@ class GraphConfigVersionManager:
             object_name = self._get_object_name(graph_name, user_id)
 
             minio_client._client.remove_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 object_name=object_name,
                 version_id=version_id
             )
@@ -167,7 +169,7 @@ class GraphConfigVersionManager:
 
             # 列出所有版本
             objects = minio_client._client.list_objects(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 prefix=object_name,
                 include_version=True
             )
@@ -176,7 +178,7 @@ class GraphConfigVersionManager:
             for obj in objects:
                 try:
                     minio_client._client.remove_object(
-                        bucket_name=settings.MINIO_BUCKET_NAME,
+                        bucket_name=settings.minio_bucket_name,
                         object_name=obj.object_name,
                         version_id=obj.version_id
                     )

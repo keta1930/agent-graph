@@ -8,7 +8,9 @@ import logging
 from typing import Optional, List, Dict, Any
 from minio import Minio
 from minio.error import S3Error
-from agent_graph.app.core.config import settings
+from agent_graph.app.core.config import get_settings
+
+settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +27,13 @@ class MinIOClient:
         """初始化 MinIO 客户端连接"""
         try:
             self._client = Minio(
-                endpoint=settings.MINIO_ENDPOINT,
-                access_key=settings.MINIO_ACCESS_KEY,
-                secret_key=settings.MINIO_SECRET_KEY,
-                secure=settings.MINIO_SECURE
+                endpoint=settings.minio_endpoint,
+                access_key=settings.minio_access_key,
+                secret_key=settings.minio_secret_key.get_secret_value(),
+                secure=settings.minio_secure
             )
             self._ensure_bucket_exists()
-            logger.info(f"MinIO 客户端初始化成功，连接到: {settings.MINIO_ENDPOINT}")
+            logger.info(f"MinIO 客户端初始化成功，连接到: {settings.minio_endpoint}")
         except Exception as e:
             logger.error(f"MinIO 客户端初始化失败: {e}")
             raise
@@ -39,11 +41,11 @@ class MinIOClient:
     def _ensure_bucket_exists(self) -> None:
         """确保存储桶存在"""
         try:
-            if not self._client.bucket_exists(settings.MINIO_BUCKET_NAME):
-                self._client.make_bucket(settings.MINIO_BUCKET_NAME)
-                logger.info(f"创建存储桶: {settings.MINIO_BUCKET_NAME}")
+            if not self._client.bucket_exists(settings.minio_bucket_name):
+                self._client.make_bucket(settings.minio_bucket_name)
+                logger.info(f"创建存储桶: {settings.minio_bucket_name}")
             else:
-                logger.info(f"存储桶已存在: {settings.MINIO_BUCKET_NAME}")
+                logger.info(f"存储桶已存在: {settings.minio_bucket_name}")
         except S3Error as e:
             logger.error(f"检查或创建存储桶失败: {e}")
             raise
@@ -62,7 +64,7 @@ class MinIOClient:
         """
         try:
             self._client.fput_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 object_name=object_name,
                 file_path=file_path,
                 content_type=content_type
@@ -92,7 +94,7 @@ class MinIOClient:
             content_stream = io.BytesIO(content_bytes)
 
             self._client.put_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 object_name=object_name,
                 data=content_stream,
                 length=len(content_bytes),
@@ -132,7 +134,7 @@ class MinIOClient:
             normalized_metadata = {f"x-amz-meta-{k}": v for k, v in (metadata or {}).items()}
 
             self._client.put_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 object_name=object_name,
                 data=file_obj,
                 length=size,
@@ -158,7 +160,7 @@ class MinIOClient:
         """
         try:
             self._client.fget_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 object_name=object_name,
                 file_path=file_path
             )
@@ -180,7 +182,7 @@ class MinIOClient:
         """
         try:
             response = self._client.get_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 object_name=object_name
             )
             content = response.read().decode('utf-8')
@@ -204,7 +206,7 @@ class MinIOClient:
         """
         try:
             self._client.remove_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 object_name=object_name
             )
             logger.info(f"对象删除成功: {object_name}")
@@ -227,7 +229,7 @@ class MinIOClient:
         try:
             objects = []
             for obj in self._client.list_objects(
-                    bucket_name=settings.MINIO_BUCKET_NAME,
+                    bucket_name=settings.minio_bucket_name,
                     prefix=prefix,
                     recursive=True
             ):
@@ -243,7 +245,7 @@ class MinIOClient:
                 if include_metadata:
                     try:
                         stat = self._client.stat_object(
-                            bucket_name=settings.MINIO_BUCKET_NAME,
+                            bucket_name=settings.minio_bucket_name,
                             object_name=obj.object_name
                         )
                         obj_info["metadata"] = stat.metadata
@@ -270,7 +272,7 @@ class MinIOClient:
         """
         try:
             self._client.stat_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 object_name=object_name
             )
             return True
@@ -289,7 +291,7 @@ class MinIOClient:
         """
         try:
             stat = self._client.stat_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+                bucket_name=settings.minio_bucket_name,
                 object_name=object_name
             )
             return {

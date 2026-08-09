@@ -1,89 +1,97 @@
-import platform
-import os
+from functools import lru_cache
 from pathlib import Path
-from dotenv import load_dotenv
+from typing import Annotated
 
-project_root = Path(__file__).parent.parent.parent.parent
-agent_graph_services_env_path = project_root / "docker" / "agent_graph_services" / ".env"
+from pydantic import AnyHttpUrl, BeforeValidator, Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-if agent_graph_services_env_path.exists():
-    load_dotenv(agent_graph_services_env_path)
-else:
-    # 如果找不到，尝试从当前工作目录加载
-    cwd_env_path = Path.cwd() / "docker" / "agent_graph_services" / ".env"
-    if cwd_env_path.exists():
-        load_dotenv(cwd_env_path)
 
-class Settings:
-    """应用配置设置"""
+def _split_comma_separated(value: str | list[str]) -> list[str]:
+    """将逗号分隔的配置值解析为列表。"""
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return value
 
-    # 应用版本和名称
-    APP_NAME: str = "Agent-Graph"
-    APP_VERSION: str = "3.0.0"
 
-    MONGODB_URL: str = os.getenv(
-        "MONGODB_URL",
-        f"mongodb://{os.getenv('MONGO_ROOT_USERNAME', 'admin')}:"
-        f"{os.getenv('MONGO_ROOT_PASSWORD', 'securepassword123')}@"
-        f"localhost:{os.getenv('MONGO_PORT', '27017')}/"
+CommaSeparatedList = Annotated[
+    list[str],
+    NoDecode,
+    BeforeValidator(_split_comma_separated),
+]
+
+
+class Settings(BaseSettings):
+    """集中管理并验证应用运行时配置。"""
+
+    app_name: str = "Agent-Graph"
+    app_version: str = "3.0.0"
+    port: int = Field(ge=1, le=65535)
+    public_api_base_url: AnyHttpUrl
+    mcp_client_host: str = "127.0.0.1"
+    mcp_client_port: int = Field(ge=1, le=65535)
+
+    mongodb_url: str = Field(min_length=1)
+    mongodb_db: str = "agent-graph"
+
+    jwt_secret_key: SecretStr = Field(min_length=32)
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = Field(default=15, ge=1, le=1440)
+    jwt_refresh_token_expire_days: int = Field(default=7, ge=1, le=90)
+
+    admin_username: str = Field(min_length=3, max_length=50)
+    admin_password: SecretStr = Field(min_length=12)
+
+    minio_endpoint: str = Field(min_length=1)
+    minio_access_key: str = Field(min_length=3)
+    minio_secret_key: SecretStr = Field(min_length=8)
+    minio_secure: bool = False
+    minio_bucket_name: str = "agent-graph"
+
+    cors_origins: CommaSeparatedList = Field(default_factory=list)
+    agent_graph_dir: Path = Field(
+        default_factory=lambda: Path.home() / ".agent_graph"
     )
 
-    MONGODB_DB: str = os.getenv("MONGO_DATABASE", "agent-graph")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
 
-    # JWT 配置
-    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
-    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "15"))  # 15分钟
-    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))  # 7天
-
-    # 超级管理员配置
-    ADMIN_USERNAME: str = os.getenv("ADMIN_USERNAME", "admin")
-    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "admin123")
-
-    # MinIO 配置
-    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", f"localhost:{os.getenv('MINIO_API_PORT', '9010')}")
-    MINIO_ACCESS_KEY: str = os.getenv("MINIO_ROOT_USER", "minioadmin")
-    MINIO_SECRET_KEY: str = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin123")
-    MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
-    MINIO_BUCKET_NAME: str = os.getenv("MINIO_BUCKET_NAME", "agent-graph")
-
-    # 根据操作系统确定配置目录
-    @property
-    def AGENT_GRAPH_DIR(self) -> Path:
-        """获取 Agent-Graph 配置目录"""
-
-        # 默认行为
-        system = platform.system()
-        home = Path.home()
-
-        if system == "Windows":
-            return home / ".agent_graph"
-        elif system == "Darwin":  # macOS
-            return home / ".agent_graph"
-        elif system == "Linux":
-            return home / ".agent_graph"
-        else:
-            return home / ".agent_graph"
+    @field_validator("jwt_secret_key", mode="before")
+    @classmethod
+    def reject_placeholder_jwt_secret(cls, value: str) -> str:
+        """拒绝示例配置中的公开 JWT 密钥。"""
+        insecure_values = {
+            "your-secret-key-change-in-production",
+            "your-secret-key-here-run-generate-script",
+        }
+        if value in insecure_values:
+            raise ValueError("JWT_SECRET_KEY must be generated before startup")
+        return value
 
     @property
-    def EXPORTS_DIR(self) -> Path:
-        """获取导出文件存储目录"""
-        return self.AGENT_GRAPH_DIR / "exports"
+    def exports_dir(self) -> Path:
+        """返回导出文件目录。"""
+        return self.agent_graph_dir / "exports"
 
     @property
-    def MCP_TOOLS_DIR(self) -> Path:
-        """获取AI生成的MCP工具存储目录"""
-        return self.AGENT_GRAPH_DIR / "mcp"
+    def mcp_tools_dir(self) -> Path:
+        """返回 MCP 工具目录。"""
+        return self.agent_graph_dir / "mcp"
 
     def ensure_directories(self) -> None:
-        """确保所有必要的目录存在"""
-        self.AGENT_GRAPH_DIR.mkdir(exist_ok=True)
-        self.EXPORTS_DIR.mkdir(exist_ok=True)
-        self.MCP_TOOLS_DIR.mkdir(exist_ok=True)
+        """创建应用运行所需的本地目录。"""
+        self.exports_dir.mkdir(parents=True, exist_ok=True)
+        self.mcp_tools_dir.mkdir(parents=True, exist_ok=True)
 
     def get_mcp_tool_dir(self, tool_name: str) -> Path:
-        """获取指定MCP工具的目录路径"""
-        return self.MCP_TOOLS_DIR / tool_name
+        """返回指定 MCP 工具的目录。"""
+        return self.mcp_tools_dir / tool_name
 
-# 创建全局设置实例
-settings = Settings()
+
+@lru_cache
+def get_settings() -> Settings:
+    """返回进程内共享的应用配置。"""
+    return Settings()

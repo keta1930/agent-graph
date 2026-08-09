@@ -6,11 +6,12 @@ import signal
 import subprocess
 import sys
 import aiohttp
-from agent_graph.app.core.config import settings
+from agent_graph.app.core.config import get_settings
 from agent_graph.app.infrastructure.database.mongodb import mongodb_client
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class MCPClientManager:
@@ -18,7 +19,9 @@ class MCPClientManager:
 
     def __init__(self):
         self.client_process = None
-        self.client_url = "http://127.0.0.1:8765"
+        self.client_url = (
+            f"http://{settings.mcp_client_host}:{settings.mcp_client_port}"
+        )
         self.client_started = False
         self.startup_retries = 5
         self.retry_delay = 1
@@ -54,11 +57,19 @@ class MCPClientManager:
     async def _start_new_client(self, config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """启动新的客户端进程"""
         python_executable = sys.executable
-        full_command = [python_executable, "-m", "agent_graph.mcp_client"]
+        full_command = [
+            python_executable,
+            "-m",
+            "agent_graph.mcp_client",
+            "--host",
+            settings.mcp_client_host,
+            "--port",
+            str(settings.mcp_client_port),
+        ]
         logger.info(f"启动MCP Client，完整命令: {' '.join(full_command)}")
 
-        stdout_file = os.path.join(str(settings.AGENT_GRAPH_DIR), "mcp_client_stdout.log")
-        stderr_file = os.path.join(str(settings.AGENT_GRAPH_DIR), "mcp_client_stderr.log")
+        stdout_file = os.path.join(str(settings.agent_graph_dir), "mcp_client_stdout.log")
+        stderr_file = os.path.join(str(settings.agent_graph_dir), "mcp_client_stderr.log")
 
         try:
             with open(stdout_file, 'w') as stdout, open(stderr_file, 'w') as stderr:

@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from typing import Dict, Any
 from agent_graph.app.infrastructure.database.mongodb import mongodb_client
 from agent_graph.app.services.mcp.mcp_service import mcp_service
-from agent_graph.app.core.config import settings
+from agent_graph.app.core.config import get_settings
 from agent_graph.app.infrastructure.storage.file_storage import FileManager
 from agent_graph.app.services.model.model_service import model_service
 from agent_graph.app.services.graph.graph_service import graph_service
@@ -21,6 +21,7 @@ from agent_graph.app.auth.dependencies import get_current_user
 from agent_graph.app.models.auth_schema import CurrentUser
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 router = APIRouter(tags=["graph"])
 

@@ -3,10 +3,10 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from typing import Dict, Any, List
 from urllib.parse import unquote
 
-from app.services.model.model_service import model_service
-from app.models.model_schema import ModelConfig
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.services.model.model_service import model_service
+from agent_graph.app.models.model_schema import ModelConfig
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ async def add_model(model: ModelConfig, current_user: CurrentUser = Depends(get_
             )
 
         # 添加模型
-        model_dict = model.dict()
+        model_dict = model.model_dump()
         success = await model_service.add_model(current_user.user_id, model_dict)
         if not success:
             raise HTTPException(
@@ -111,7 +111,7 @@ async def update_model(model_name: str, model: ModelConfig, current_user: Curren
                 )
 
         # 更新模型
-        model_dict = model.dict()
+        model_dict = model.model_dump()
         success = await model_service.update_model(model_name, current_user.user_id, model_dict)
         if not success:
             raise HTTPException(

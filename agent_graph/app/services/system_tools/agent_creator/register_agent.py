@@ -63,9 +63,9 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
         }
     """
     try:
-        from app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
-        from app.services.agent.agent_service import agent_service
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
+        from agent_graph.app.services.agent.agent_service import agent_service
+        from agent_graph.app.services.system_tools.registry import get_current_language
         
         # 获取当前用户语言
         language = get_current_language()
@@ -191,7 +191,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"register_agent 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         error_msg = f"Failed to register Agent: {str(e)}" if language == "en" else f"注册 Agent 失败：{str(e)}"
         return {

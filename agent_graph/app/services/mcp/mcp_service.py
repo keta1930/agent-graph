@@ -1,9 +1,9 @@
 import logging
 from typing import Dict, List, Any, Optional
-from app.services.mcp.client_manager import MCPClientManager
-from app.services.mcp.server_manager import MCPServerManager
-from app.services.tool_execution import ToolExecutor
-from app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.services.mcp.client_manager import MCPClientManager
+from agent_graph.app.services.mcp.server_manager import MCPServerManager
+from agent_graph.app.services.tool_execution import ToolExecutor
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
 logger = logging.getLogger(__name__)
 
 
@@ -211,7 +211,7 @@ class MCPService:
         try:
             import asyncio
             from datetime import datetime
-            from app.infrastructure.storage.file_storage import FileManager
+            from agent_graph.app.infrastructure.storage.file_storage import FileManager
 
             max_retries = 3
             for attempt in range(max_retries):

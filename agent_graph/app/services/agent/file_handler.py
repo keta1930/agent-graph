@@ -76,9 +76,9 @@ class FileHandler:
                 "files_uploaded": ["data.csv", "note.txt"]
             }
         """
-        from app.infrastructure.storage.object_storage.conversation_image_manager import conversation_image_manager
-        from app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
-        from app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.infrastructure.storage.object_storage.conversation_image_manager import conversation_image_manager
+        from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
 
         images_info = []
         text_file_tasks = []

@@ -6,9 +6,7 @@
 import logging
 from typing import Optional, Dict, Any, List
 from io import BytesIO
-from app.core.config import settings
-from minio.versioningconfig import VersioningConfig, ENABLED
-from app.infrastructure.storage.object_storage.minio_client import minio_client
+from agent_graph.app.infrastructure.storage.object_storage.minio_client import minio_client
 
 logger = logging.getLogger(__name__)
 
@@ -17,25 +15,6 @@ class ConversationDocumentManager:
     """会话文档管理器 - 负责MinIO存储和版本控制"""
 
     STORAGE_PREFIX = "conversation_doc"
-
-    def __init__(self):
-        self._ensure_versioning_enabled()
-
-    def _ensure_versioning_enabled(self):
-        """确保 bucket 启用了版本控制"""
-        try:
-            versioning = minio_client._client.get_bucket_versioning(
-                settings.MINIO_BUCKET_NAME
-            )
-
-            if versioning.status != "Enabled":
-                minio_client._client.set_bucket_versioning(
-                    settings.MINIO_BUCKET_NAME,
-                    VersioningConfig(ENABLED)
-                )
-                logger.info(f"✓ 已为 bucket '{settings.MINIO_BUCKET_NAME}' 启用版本控制")
-        except Exception as e:
-            logger.error(f"启用版本控制失败: {e}")
 
     def _get_object_name(self, user_id: str, conversation_id: str, filename: str) -> str:
         """
@@ -70,8 +49,8 @@ class ConversationDocumentManager:
             content_bytes = content.encode('utf-8')
             content_stream = BytesIO(content_bytes)
 
-            result = minio_client._client.put_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            result = minio_client.client.put_object(
+                bucket_name=minio_client.bucket_name,
                 object_name=object_name,
                 data=content_stream,
                 length=len(content_bytes),
@@ -109,8 +88,8 @@ class ConversationDocumentManager:
             content_bytes = content.encode('utf-8')
             content_stream = BytesIO(content_bytes)
 
-            result = minio_client._client.put_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            result = minio_client.client.put_object(
+                bucket_name=minio_client.bucket_name,
                 object_name=object_name,
                 data=content_stream,
                 length=len(content_bytes),
@@ -147,14 +126,14 @@ class ConversationDocumentManager:
             object_name = self._get_object_name(user_id, conversation_id, filename)
 
             if version_id:
-                response = minio_client._client.get_object(
-                    bucket_name=settings.MINIO_BUCKET_NAME,
+                response = minio_client.client.get_object(
+                    bucket_name=minio_client.bucket_name,
                     object_name=object_name,
                     version_id=version_id
                 )
             else:
-                response = minio_client._client.get_object(
-                    bucket_name=settings.MINIO_BUCKET_NAME,
+                response = minio_client.client.get_object(
+                    bucket_name=minio_client.bucket_name,
                     object_name=object_name
                 )
 
@@ -185,8 +164,8 @@ class ConversationDocumentManager:
             object_name = self._get_object_name(user_id, conversation_id, filename)
 
             # 列出所有版本
-            objects = minio_client._client.list_objects(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            objects = minio_client.client.list_objects(
+                bucket_name=minio_client.bucket_name,
                 prefix=object_name,
                 include_version=True
             )
@@ -195,8 +174,8 @@ class ConversationDocumentManager:
             for obj in objects:
                 if obj.object_name == object_name:  # 确保完全匹配
                     try:
-                        minio_client._client.remove_object(
-                            bucket_name=settings.MINIO_BUCKET_NAME,
+                        minio_client.client.remove_object(
+                            bucket_name=minio_client.bucket_name,
                             object_name=obj.object_name,
                             version_id=obj.version_id
                         )
@@ -228,8 +207,8 @@ class ConversationDocumentManager:
         try:
             object_name = self._get_object_name(user_id, conversation_id, filename)
 
-            objects = minio_client._client.list_objects(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            objects = minio_client.client.list_objects(
+                bucket_name=minio_client.bucket_name,
                 prefix=object_name,
                 include_version=True
             )
@@ -267,8 +246,8 @@ class ConversationDocumentManager:
             prefix = f"{self.STORAGE_PREFIX}/{user_id}/{conversation_id}/"
 
             # 列出所有文件的所有版本
-            objects = minio_client._client.list_objects(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            objects = minio_client.client.list_objects(
+                bucket_name=minio_client.bucket_name,
                 prefix=prefix,
                 include_version=True,
                 recursive=True
@@ -278,8 +257,8 @@ class ConversationDocumentManager:
             count = 0
             for obj in objects:
                 try:
-                    minio_client._client.remove_object(
-                        bucket_name=settings.MINIO_BUCKET_NAME,
+                    minio_client.client.remove_object(
+                        bucket_name=minio_client.bucket_name,
                         object_name=obj.object_name,
                         version_id=obj.version_id
                     )

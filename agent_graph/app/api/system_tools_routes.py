@@ -1,20 +1,20 @@
 import logging
 from fastapi import APIRouter, HTTPException, status, Depends
-from app.services.system_tools import (
+from agent_graph.app.services.system_tools import (
     get_tool_schema,
     is_system_tool,
     get_tools_by_category
 )
-from app.services.system_tools.registry import set_user_language_context
-from app.infrastructure.database.mongodb import mongodb_client
-from app.models.system_tools_schema import (
+from agent_graph.app.services.system_tools.registry import set_user_language_context
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.models.system_tools_schema import (
     SystemToolSchema,
     SystemToolListResponse,
     SystemToolDetailResponse,
     ToolCategory
 )
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
 
 logger = logging.getLogger(__name__)
 

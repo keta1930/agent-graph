@@ -1,9 +1,9 @@
 import logging
 from typing import Dict, List, Any, Optional, AsyncGenerator
 from openai import AsyncOpenAI
-from app.services.model.param_builder import ParamBuilder
-from app.services.model.stream_handler import StreamHandler
-from app.services.model.response_parser import ResponseParser
+from agent_graph.app.services.model.param_builder import ParamBuilder
+from agent_graph.app.services.model.stream_handler import StreamHandler
+from agent_graph.app.services.model.response_parser import ResponseParser
 
 logger = logging.getLogger(__name__)
 
@@ -287,20 +287,19 @@ class ModelService:
 
     # ========== 非SSE调用方法 ==========
 
-    async def call_model(self,
-                        model_name: str,
-                        messages: List[Dict[str, Any]],
-                        tools: List[Dict[str, Any]] = None,
-                        user_id: str = "default_user") -> Dict[str, Any]:
+    async def call_model(
+        self,
+        model_name: str,
+        messages: List[Dict[str, Any]],
+        user_id: str = "default_user",
+    ) -> Dict[str, Any]:
         """调用模型API（非SSE场景，用于生成标题、压缩对话等静态调用）
 
-        注意：此方法不支持工具调用，tools参数保留仅为兼容性考虑。
         如需工具调用支持，请使用 stream_chat_with_tools() 方法。
 
         Args:
             model_name: 模型名称
             messages: 消息列表
-            tools: 工具列表（保留参数，但不会被使用）
             user_id: 用户ID
 
         Returns:
@@ -328,9 +327,6 @@ class ModelService:
                 "model": model_config["model"],
                 "messages": messages
             }
-
-            if tools:
-                base_params["tools"] = tools
 
             # 使用参数构建器准备参数
             params, extra_kwargs = self.param_builder.prepare_api_params(base_params, model_config)

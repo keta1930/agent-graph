@@ -2,7 +2,7 @@
 Graph 设计工具模块
 提供 Graph 设计、导出和注册相关的系统工具
 """
-from app.services.system_tools.registry import register_system_tool
+from agent_graph.app.services.system_tools.registry import register_system_tool
 
 # 导入所有工具
 from . import get_graph_spec

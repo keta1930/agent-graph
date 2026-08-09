@@ -36,7 +36,7 @@ class MessageCreator:
             conversation = await self.conversation_manager.get_conversation(conversation_id)
 
         # 导入模板处理器
-        from app.utils.output_tools import GraphPromptTemplate
+        from agent_graph.app.utils.output_tools import GraphPromptTemplate
         template_processor = GraphPromptTemplate()
 
         # 获取全局输出历史
@@ -91,7 +91,7 @@ class MessageCreator:
         conversation["rounds"].append(start_round)
 
         # 保存到数据库
-        from app.infrastructure.database.mongodb import mongodb_client
+        from agent_graph.app.infrastructure.database.mongodb import mongodb_client
         await mongodb_client.add_round_to_graph_run(
             conversation_id=conversation_id,
             round_data=start_round,

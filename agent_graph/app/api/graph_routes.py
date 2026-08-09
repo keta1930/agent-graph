@@ -1,18 +1,29 @@
 import logging
+from typing import Annotated, Any, Dict, List
+
+from asyncer import asyncify
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse, JSONResponse, Response
-from typing import Dict, List, Any
-from app.services.model.model_service import model_service
-from app.services.graph.graph_service import graph_service
-from app.templates.flow_diagram import FlowDiagram
-from app.utils.sse_helper import SSEHelper
-from app.models.graph_schema import GraphConfig, GraphInput
-from app.infrastructure.database.mongodb import mongodb_client
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.services.model.model_service import model_service
+from agent_graph.app.services.graph.graph_service import graph_service
+from agent_graph.app.templates.flow_diagram import FlowDiagram
+from agent_graph.app.utils.sse_helper import SSEHelper
+from agent_graph.app.models.graph_schema import (
+    GraphConfig,
+    GraphInput,
+    MCPGenerationResponse,
+)
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
+from agent_graph.app.core.config import Settings, get_settings
+
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["graph"])
+CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
+SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 # ======= 图管理 =======
 @router.get("/graphs", response_model=List[str])
@@ -103,14 +114,14 @@ async def get_graph_readme(graph_name: str, current_user: CurrentUser = Depends(
 async def create_graph(graph: GraphConfig, current_user: CurrentUser = Depends(get_current_user)):
     """创建新图或更新现有图"""
     try:
-        valid, error = await graph_service.validate_graph(graph.dict(), user_id=current_user.user_id)
+        valid, error = await graph_service.validate_graph(graph.model_dump(), user_id=current_user.user_id)
         if not valid:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"图配置无效: {error}"
             )
 
-        graph_dict = graph.dict()
+        graph_dict = graph.model_dump()
 
         mcp_config_data = await mongodb_client.get_mcp_config()
         mcp_config = mcp_config_data.get("config", {"mcpServers": {}}) if mcp_config_data else {"mcpServers": {}}
@@ -236,9 +247,13 @@ async def rename_graph(old_name: str, new_name: str, current_user: CurrentUser =
         )
 
 
-@router.get("/graphs/{graph_name}/generate_mcp", response_model=Dict[str, Any])
-async def generate_mcp_script(graph_name: str, current_user: CurrentUser = Depends(get_current_user)):
-    """生成MCP服务器脚本"""
+@router.get("/graphs/{graph_name}/generate_mcp")
+async def generate_mcp_script(
+    graph_name: str,
+    current_user: CurrentUserDep,
+    settings: SettingsDep,
+) -> MCPGenerationResponse:
+    """生成 MCP server 脚本。"""
     try:
         graph_doc = await graph_service.get_graph(graph_name, user_id=current_user.user_id)
         if not graph_doc:
@@ -246,28 +261,22 @@ async def generate_mcp_script(graph_name: str, current_user: CurrentUser = Depen
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"找不到图 '{graph_name}'"
             )
-        # TODO: Graph→MCP 导出功能待重设计。此 host 是生成脚本回调本服务 API 的地址，
-        # 当前 localhost:9999 是过时端口，重设计时应改为可配置的 API_BASE_URL。
-        host = "http://localhost:9999"
         graph_config = graph_doc.get("config", {})
 
-        result = graph_service.generate_mcp_script(graph_name, graph_config, host)
-
-        if isinstance(result, str):
-            return {
-                "graph_name": graph_name,
-                "script": result
-            }
-
-        return result
+        result = await asyncify(graph_service.generate_mcp_script)(
+            graph_name,
+            graph_config,
+            str(settings.public_api_base_url).rstrip("/"),
+        )
+        return MCPGenerationResponse.model_validate(result)
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"生成MCP脚本时出错: {str(e)}")
+    except Exception:
+        logger.exception("生成 MCP server 脚本时出错")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"生成MCP脚本时出错: {str(e)}"
-        )
+            detail="生成 MCP server 脚本失败",
+        ) from None
 
 # ======= 图执行 =======
 @router.post("/graphs/execute")

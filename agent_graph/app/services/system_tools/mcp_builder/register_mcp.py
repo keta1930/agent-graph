@@ -64,11 +64,11 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
         }
     """
     try:
-        from app.infrastructure.database.mongodb.client import mongodb_client
-        from app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
-        from app.infrastructure.storage.file_storage import FileManager
-        from app.utils.text_parser import parse_ai_mcp_generation_response
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
+        from agent_graph.app.infrastructure.storage.file_storage import FileManager
+        from agent_graph.app.utils.text_parser import parse_ai_mcp_generation_response
+        from agent_graph.app.services.system_tools.registry import get_current_language
 
         # 获取当前用户语言
         language = get_current_language()
@@ -211,7 +211,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"register_mcp 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         if language == "en":
@@ -238,9 +238,9 @@ async def _register_mcp_to_config(tool_name: str, user_id: str) -> bool:
         注册是否成功
     """
     try:
-        from app.infrastructure.database.mongodb.client import mongodb_client
-        from app.infrastructure.storage.file_storage import FileManager
-        from app.services.mcp.mcp_service import mcp_service
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.infrastructure.storage.file_storage import FileManager
+        from agent_graph.app.services.mcp.mcp_service import mcp_service
 
         max_retries = 3
         for attempt in range(max_retries):

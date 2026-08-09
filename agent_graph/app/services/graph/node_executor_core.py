@@ -3,9 +3,9 @@ import json
 import logging
 import copy
 from typing import Dict, List, Any, AsyncGenerator
-from app.services.model.model_service import model_service
-from app.services.graph.handoffs_manager import HandoffsManager
-from app.services.agent.agent_stream_executor import AgentStreamExecutor
+from agent_graph.app.services.model.model_service import model_service
+from agent_graph.app.services.graph.handoffs_manager import HandoffsManager
+from agent_graph.app.services.agent.agent_stream_executor import AgentStreamExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ class NodeExecutorCore:
             # 准备系统工具
             system_tools_list = []
             if system_tools:
-                from app.services.system_tools import get_system_tools_by_names
+                from agent_graph.app.services.system_tools import get_system_tools_by_names
                 system_tools_list = get_system_tools_by_names(system_tools)
             
             all_tools = handoffs_tools + mcp_tools + system_tools_list
@@ -192,7 +192,7 @@ class NodeExecutorCore:
 
             conversation["rounds"].append(round_data)
 
-            from app.infrastructure.database.mongodb import mongodb_client
+            from agent_graph.app.infrastructure.database.mongodb import mongodb_client
             await mongodb_client.add_round_to_graph_run(
                 conversation_id=conversation_id,
                 round_data=round_data,
@@ -220,7 +220,7 @@ class NodeExecutorCore:
                 )
 
             # 12. 更新执行链
-            from app.services.graph.execution_chain_manager import ExecutionChainManager
+            from agent_graph.app.services.graph.execution_chain_manager import ExecutionChainManager
             await ExecutionChainManager.update_execution_chain(conversation)
 
             # 13. 保存会话文件
@@ -237,7 +237,7 @@ class NodeExecutorCore:
         except Exception as e:
             logger.error(f"执行节点 '{node['name']}' 时出错: {str(e)}")
             if yield_sse:
-                from app.utils.sse_helper import SSEHelper
+                from agent_graph.app.utils.sse_helper import SSEHelper
                 yield SSEHelper.send_error(str(e))
             raise
 
@@ -262,5 +262,5 @@ class NodeExecutorCore:
         if not mcp_servers:
             return []
         
-        from app.services.mcp.mcp_service import mcp_service
+        from agent_graph.app.services.mcp.mcp_service import mcp_service
         return await mcp_service.prepare_chat_tools(mcp_servers)

@@ -6,9 +6,9 @@ import logging
 import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from app.infrastructure.database.mongodb.client import mongodb_client
-from app.infrastructure.storage.object_storage.project_document_manager import project_document_manager
-from app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
+from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+from agent_graph.app.infrastructure.storage.object_storage.project_document_manager import project_document_manager
+from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
 
 logger = logging.getLogger(__name__)
 

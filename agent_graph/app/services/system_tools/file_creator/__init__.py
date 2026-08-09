@@ -2,7 +2,7 @@
 会话文档系统工具模块
 包含 7 个文件操作相关的系统工具
 """
-from app.services.system_tools.registry import register_system_tool
+from agent_graph.app.services.system_tools.registry import register_system_tool
 
 # 导入所有工具
 from . import list_all_files

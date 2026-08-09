@@ -53,7 +53,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
     """
     try:
         # 从上下文获取用户语言
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
 
         # 获取当前文件所在目录
@@ -79,7 +79,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"get_graph_spec 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
 
         if language == "en":

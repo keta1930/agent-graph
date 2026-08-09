@@ -1,91 +1,61 @@
-"""
-JWT Token生成和验证模块
-
-支持双Token机制：
-- Access Token: 短期访问令牌（15分钟）
-- Refresh Token: 长期刷新令牌（7天）
-"""
+"""JWT access token 与 refresh token 的签发和验证。"""
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
 from jose import JWTError, jwt
 from fastapi import HTTPException, status
 import secrets
 
-from app.core.config import settings
+from agent_graph.app.core.config import get_settings
+
+
+settings = get_settings()
 
 
 def create_tokens(user_id: str, role: str) -> Tuple[str, str, str, datetime]:
-    """
-    创建访问令牌和刷新令牌
-
-    Args:
-        user_id: 用户ID
-        role: 用户角色 (user|admin|super_admin)
-
-    Returns:
-        Tuple[str, str, str, datetime]: (access_token, refresh_token, refresh_token_id, refresh_expires_at)
-
-    Example:
-        >>> access, refresh, jti, exp = create_tokens("zhangsan", "user")
-    """
+    """创建一组 access token 与 refresh token。"""
     now = datetime.now()
 
-    # 1. 创建 Access Token (15分钟)
-    access_expire = now + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_expire = now + timedelta(minutes=settings.jwt_access_token_expire_minutes)
     access_payload = {
         "sub": user_id,
         "role": role,
-        "type": "access",  # 标记Token类型
+        "type": "access",
         "iat": int(now.timestamp()),
         "exp": int(access_expire.timestamp())
     }
     access_token = jwt.encode(
         access_payload,
-        settings.JWT_SECRET_KEY,
-        algorithm=settings.JWT_ALGORITHM
+        settings.jwt_secret_key.get_secret_value(),
+        algorithm=settings.jwt_algorithm
     )
 
-    # 2. 创建 Refresh Token (7天)
-    refresh_expire = now + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
-    refresh_token_id = secrets.token_urlsafe(32)  # 生成唯一ID
+    refresh_expire = now + timedelta(days=settings.jwt_refresh_token_expire_days)
+    refresh_token_id = secrets.token_urlsafe(32)
 
     refresh_payload = {
         "sub": user_id,
-        "type": "refresh",  # 标记Token类型
-        "jti": refresh_token_id,  # Token唯一ID（用于数据库存储和撤销）
+        "type": "refresh",
+        "jti": refresh_token_id,
         "iat": int(now.timestamp()),
         "exp": int(refresh_expire.timestamp())
     }
     refresh_token = jwt.encode(
         refresh_payload,
-        settings.JWT_SECRET_KEY,
-        algorithm=settings.JWT_ALGORITHM
+        settings.jwt_secret_key.get_secret_value(),
+        algorithm=settings.jwt_algorithm
     )
 
     return access_token, refresh_token, refresh_token_id, refresh_expire
 
 
 def create_access_token(user_id: str, role: str, expires_delta: Optional[timedelta] = None) -> str:
-    """
-    创建JWT访问令牌（兼容旧接口）
-
-    Args:
-        user_id: 用户ID
-        role: 用户角色 (user|admin|super_admin)
-        expires_delta: 可选的过期时间增量
-
-    Returns:
-        str: JWT令牌字符串
-
-    Note:
-        这个函数保留是为了向后兼容，建议使用 create_tokens()
-    """
+    """创建 access token，并允许覆盖默认有效期。"""
     now = datetime.now()
 
     if expires_delta:
         expire = now + expires_delta
     else:
-        expire = now + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = now + timedelta(minutes=settings.jwt_access_token_expire_minutes)
 
     payload: Dict[str, Any] = {
         "sub": user_id,
@@ -97,50 +67,20 @@ def create_access_token(user_id: str, role: str, expires_delta: Optional[timedel
 
     encoded_jwt = jwt.encode(
         payload,
-        settings.JWT_SECRET_KEY,
-        algorithm=settings.JWT_ALGORITHM
+        settings.jwt_secret_key.get_secret_value(),
+        algorithm=settings.jwt_algorithm
     )
 
     return encoded_jwt
 
 
 def verify_token(token: str) -> Dict[str, Any]:
-    """
-    验证JWT令牌并返回payload（兼容旧接口）
-
-    Args:
-        token: JWT令牌字符串
-
-    Returns:
-        dict: 包含用户信息的字典
-
-    Raises:
-        HTTPException: 当token无效或过期时抛出401错误
-
-    Note:
-        这个函数保留是为了向后兼容，建议使用 verify_access_token()
-    """
+    """验证 access token 并返回 payload。"""
     return verify_access_token(token)
 
 
 def verify_access_token(token: str) -> Dict[str, Any]:
-    """
-    验证访问令牌
-
-    Args:
-        token: Access Token字符串
-
-    Returns:
-        dict: 包含用户信息的字典，格式为 {"sub": user_id, "role": role, ...}
-
-    Raises:
-        HTTPException: 当token无效、过期或类型错误时抛出401错误
-
-    Example:
-        >>> payload = verify_access_token(token)
-        >>> print(payload["sub"])  # zhangsan
-        >>> print(payload["role"])  # user
-    """
+    """验证 access token 的签名、有效期、类型和必要字段。"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="无效的访问令牌",
@@ -148,14 +88,12 @@ def verify_access_token(token: str) -> Dict[str, Any]:
     )
 
     try:
-        # 解码JWT token
         payload = jwt.decode(
             token,
-            settings.JWT_SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM]
+            settings.jwt_secret_key.get_secret_value(),
+            algorithms=[settings.jwt_algorithm]
         )
 
-        # 验证Token类型
         token_type = payload.get("type")
         if token_type and token_type != "access":
             raise HTTPException(
@@ -164,7 +102,6 @@ def verify_access_token(token: str) -> Dict[str, Any]:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # 验证必要字段
         user_id: Optional[str] = payload.get("sub")
         role: Optional[str] = payload.get("role")
 
@@ -174,7 +111,6 @@ def verify_access_token(token: str) -> Dict[str, Any]:
         return payload
 
     except JWTError as e:
-        # JWT解码失败或token过期
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Access Token验证失败: {str(e)}",
@@ -183,23 +119,7 @@ def verify_access_token(token: str) -> Dict[str, Any]:
 
 
 def verify_refresh_token(token: str) -> Dict[str, Any]:
-    """
-    验证刷新令牌
-
-    Args:
-        token: Refresh Token字符串
-
-    Returns:
-        dict: 包含用户信息的字典，格式为 {"sub": user_id, "jti": token_id, ...}
-
-    Raises:
-        HTTPException: 当token无效、过期或类型错误时抛出401错误
-
-    Example:
-        >>> payload = verify_refresh_token(token)
-        >>> print(payload["sub"])  # zhangsan
-        >>> print(payload["jti"])  # token_id
-    """
+    """验证 refresh token 的签名、有效期、类型和必要字段。"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="无效的刷新令牌",
@@ -207,14 +127,12 @@ def verify_refresh_token(token: str) -> Dict[str, Any]:
     )
 
     try:
-        # 解码JWT token
         payload = jwt.decode(
             token,
-            settings.JWT_SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM]
+            settings.jwt_secret_key.get_secret_value(),
+            algorithms=[settings.jwt_algorithm]
         )
 
-        # 验证Token类型
         token_type = payload.get("type")
         if token_type != "refresh":
             raise HTTPException(
@@ -223,7 +141,6 @@ def verify_refresh_token(token: str) -> Dict[str, Any]:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # 验证必要字段
         user_id: Optional[str] = payload.get("sub")
         token_id: Optional[str] = payload.get("jti")
 
@@ -233,7 +150,6 @@ def verify_refresh_token(token: str) -> Dict[str, Any]:
         return payload
 
     except JWTError as e:
-        # JWT解码失败或token过期
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Refresh Token验证失败: {str(e)}",
@@ -242,17 +158,7 @@ def verify_refresh_token(token: str) -> Dict[str, Any]:
 
 
 def decode_token_without_verification(token: str) -> Optional[Dict[str, Any]]:
-    """
-    解码JWT令牌但不验证（用于调试或特殊场景）
-
-    警告: 此函数不验证签名和过期时间，仅用于调试目的
-
-    Args:
-        token: JWT令牌字符串
-
-    Returns:
-        dict: 解码后的payload，如果解码失败返回None
-    """
+    """不验证签名和有效期地解码 JWT，仅供受控诊断流程使用。"""
     try:
         payload = jwt.decode(
             token,

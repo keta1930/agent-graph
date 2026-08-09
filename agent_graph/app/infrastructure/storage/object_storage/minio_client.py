@@ -1,52 +1,68 @@
-"""
-MinIO 客户端管理器 - 优化版本
-提供通用的 MinIO 对象存储操作功能
-"""
+"""提供 MinIO 对象存储操作。"""
+
 import io
-import os
 import logging
-from typing import Optional, List, Dict, Any
+import os
+from typing import Any, Dict, List, Optional
+
 from minio import Minio
 from minio.error import S3Error
-from app.core.config import settings
+from minio.versioningconfig import ENABLED, VersioningConfig
+
+from agent_graph.app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
 
 class MinIOClient:
-    """MinIO 客户端封装类"""
+    """管理 MinIO 连接和 bucket 操作。"""
 
-    def __init__(self):
-        """初始化 MinIO 客户端"""
-        self._client = None
-        self._initialize_client()
+    def __init__(self) -> None:
+        self._client: Minio | None = None
+        self._bucket_name: str | None = None
 
-    def _initialize_client(self) -> None:
-        """初始化 MinIO 客户端连接"""
-        try:
-            self._client = Minio(
-                endpoint=settings.MINIO_ENDPOINT,
-                access_key=settings.MINIO_ACCESS_KEY,
-                secret_key=settings.MINIO_SECRET_KEY,
-                secure=settings.MINIO_SECURE
-            )
-            self._ensure_bucket_exists()
-            logger.info(f"MinIO 客户端初始化成功，连接到: {settings.MINIO_ENDPOINT}")
-        except Exception as e:
-            logger.error(f"MinIO 客户端初始化失败: {e}")
-            raise
+    @property
+    def client(self) -> Minio:
+        """返回已初始化的 MinIO SDK client。"""
+        if self._client is None:
+            raise RuntimeError("MinIO client has not been initialized")
+        return self._client
+
+    @property
+    def bucket_name(self) -> str:
+        """返回当前配置的 bucket 名称。"""
+        if self._bucket_name is None:
+            raise RuntimeError("MinIO client has not been initialized")
+        return self._bucket_name
+
+    def initialize(self, settings: Settings) -> None:
+        """建立 MinIO client 并准备应用 bucket。"""
+        self._client = Minio(
+            endpoint=settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key.get_secret_value(),
+            secure=settings.minio_secure,
+        )
+        self._bucket_name = settings.minio_bucket_name
+        self._ensure_bucket_exists()
+        self._ensure_versioning_enabled()
+        logger.info("MinIO 客户端初始化成功，连接到: %s", settings.minio_endpoint)
 
     def _ensure_bucket_exists(self) -> None:
-        """确保存储桶存在"""
-        try:
-            if not self._client.bucket_exists(settings.MINIO_BUCKET_NAME):
-                self._client.make_bucket(settings.MINIO_BUCKET_NAME)
-                logger.info(f"创建存储桶: {settings.MINIO_BUCKET_NAME}")
-            else:
-                logger.info(f"存储桶已存在: {settings.MINIO_BUCKET_NAME}")
-        except S3Error as e:
-            logger.error(f"检查或创建存储桶失败: {e}")
-            raise
+        """确保应用 bucket 存在。"""
+        if not self.client.bucket_exists(self.bucket_name):
+            self.client.make_bucket(self.bucket_name)
+            logger.info("创建 bucket: %s", self.bucket_name)
+
+    def _ensure_versioning_enabled(self) -> None:
+        """确保应用 bucket 启用版本控制。"""
+        versioning = self.client.get_bucket_versioning(self.bucket_name)
+        if versioning.status != "Enabled":
+            self.client.set_bucket_versioning(
+                self.bucket_name,
+                VersioningConfig(ENABLED),
+            )
+            logger.info("已为 bucket '%s' 启用版本控制", self.bucket_name)
 
     def upload_file(self, object_name: str, file_path: str, content_type: str = None) -> bool:
         """
@@ -61,16 +77,16 @@ class MinIOClient:
             bool: 上传是否成功
         """
         try:
-            self._client.fput_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            self.client.fput_object(
+                bucket_name=self.bucket_name,
                 object_name=object_name,
                 file_path=file_path,
                 content_type=content_type
             )
-            logger.info(f"文件上传成功: {object_name}")
+            logger.info("文件上传成功: %s", object_name)
             return True
-        except S3Error as e:
-            logger.error(f"文件上传失败 {object_name}: {e}")
+        except S3Error:
+            logger.exception("文件上传失败: %s", object_name)
             return False
 
     def upload_content(self, object_name: str, content: str, content_type: str = "text/plain",
@@ -91,18 +107,18 @@ class MinIOClient:
             content_bytes = content.encode('utf-8')
             content_stream = io.BytesIO(content_bytes)
 
-            self._client.put_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            self.client.put_object(
+                bucket_name=self.bucket_name,
                 object_name=object_name,
                 data=content_stream,
                 length=len(content_bytes),
                 content_type=content_type,
                 metadata=metadata or {}
             )
-            logger.info(f"内容上传成功: {object_name}")
+            logger.info("内容上传成功: %s", object_name)
             return True
-        except S3Error as e:
-            logger.error(f"内容上传失败 {object_name}: {e}")
+        except S3Error:
+            logger.exception("内容上传失败: %s", object_name)
             return False
 
     def upload_fileobj(self, object_name: str, file_obj, content_type: str = "text/plain",
@@ -131,8 +147,8 @@ class MinIOClient:
             # 规范化元数据 key
             normalized_metadata = {f"x-amz-meta-{k}": v for k, v in (metadata or {}).items()}
 
-            self._client.put_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            self.client.put_object(
+                bucket_name=self.bucket_name,
                 object_name=object_name,
                 data=file_obj,
                 length=size,
@@ -157,8 +173,8 @@ class MinIOClient:
             bool: 下载是否成功
         """
         try:
-            self._client.fget_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            self.client.fget_object(
+                bucket_name=self.bucket_name,
                 object_name=object_name,
                 file_path=file_path
             )
@@ -179,8 +195,8 @@ class MinIOClient:
             Optional[str]: 文件内容字符串，失败时返回 None
         """
         try:
-            response = self._client.get_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            response = self.client.get_object(
+                bucket_name=self.bucket_name,
                 object_name=object_name
             )
             content = response.read().decode('utf-8')
@@ -203,8 +219,8 @@ class MinIOClient:
             bool: 删除是否成功
         """
         try:
-            self._client.remove_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            self.client.remove_object(
+                bucket_name=self.bucket_name,
                 object_name=object_name
             )
             logger.info(f"对象删除成功: {object_name}")
@@ -226,8 +242,8 @@ class MinIOClient:
         """
         try:
             objects = []
-            for obj in self._client.list_objects(
-                    bucket_name=settings.MINIO_BUCKET_NAME,
+            for obj in self.client.list_objects(
+                    bucket_name=self.bucket_name,
                     prefix=prefix,
                     recursive=True
             ):
@@ -242,8 +258,8 @@ class MinIOClient:
                 # 如果需要元数据，获取详细信息
                 if include_metadata:
                     try:
-                        stat = self._client.stat_object(
-                            bucket_name=settings.MINIO_BUCKET_NAME,
+                        stat = self.client.stat_object(
+                            bucket_name=self.bucket_name,
                             object_name=obj.object_name
                         )
                         obj_info["metadata"] = stat.metadata
@@ -269,8 +285,8 @@ class MinIOClient:
             bool: 对象是否存在
         """
         try:
-            self._client.stat_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            self.client.stat_object(
+                bucket_name=self.bucket_name,
                 object_name=object_name
             )
             return True
@@ -288,8 +304,8 @@ class MinIOClient:
             Optional[Dict[str, Any]]: 对象信息，不存在时返回 None
         """
         try:
-            stat = self._client.stat_object(
-                bucket_name=settings.MINIO_BUCKET_NAME,
+            stat = self.client.stat_object(
+                bucket_name=self.bucket_name,
                 object_name=object_name
             )
             return {

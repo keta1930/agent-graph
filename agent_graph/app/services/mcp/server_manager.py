@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class MCPServerManager:
     """MCP服务器管理器 - 专门负责服务器连接管理"""
 
-    def __init__(self, client_url: str = "http://127.0.0.1:8765"):
+    def __init__(self, client_url: str):
         self.client_url = client_url
         self._session = None
         self._connection_locks: Dict[str, asyncio.Lock] = {}

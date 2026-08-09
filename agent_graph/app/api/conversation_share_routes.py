@@ -8,16 +8,16 @@ import os
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import Response, FileResponse
 
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
-from app.models.conversation_share_schema import (
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
+from agent_graph.app.models.conversation_share_schema import (
     CreateShareResponse,
     SharedConversationResponse,
     SharedFilesResponse,
     ShareStatusResponse,
     DeleteShareResponse
 )
-from app.services.conversation.conversation_share_service import conversation_share_service
+from agent_graph.app.services.conversation.conversation_share_service import conversation_share_service
 
 logger = logging.getLogger(__name__)
 

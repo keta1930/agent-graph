@@ -10,8 +10,8 @@ import re
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 
-from app.infrastructure.database.mongodb import mongodb_client
-from app.services.model.model_service import model_service
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.services.model.model_service import model_service
 
 logger = logging.getLogger(__name__)
 
@@ -652,7 +652,6 @@ class MemoryService:
             response = await model_service.call_model(
                 model_name=model_name,
                 messages=[{"role": "user", "content": prompt}],
-                tools= None,
                 user_id=user_id
             )
 

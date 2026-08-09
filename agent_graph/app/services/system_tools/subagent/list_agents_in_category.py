@@ -70,8 +70,8 @@ async def handler(user_id: str, category: str, **kwargs) -> Dict[str, Any]:
         }
     """
     try:
-        from app.infrastructure.database.mongodb.client import mongodb_client
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.services.system_tools.registry import get_current_language
 
         # 获取当前语言
         language = get_current_language()
@@ -93,7 +93,7 @@ async def handler(user_id: str, category: str, **kwargs) -> Dict[str, Any]:
         logger.error(f"list_agents_in_category 执行失败 (category={category}): {str(e)}")
         
         # 根据语言返回错误消息
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         error_msg = "Failed to get Agents in category" if language == "en" else "获取分类下的 Agents 失败"

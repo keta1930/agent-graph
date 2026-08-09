@@ -2,10 +2,10 @@ import logging
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Depends
 from typing import Dict, Any
 
-from app.services.mcp.mcp_service import mcp_service
-from app.services.graph.graph_service import graph_service
-from app.auth.dependencies import require_admin
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.services.mcp.mcp_service import mcp_service
+from agent_graph.app.services.graph.graph_service import graph_service
+from agent_graph.app.auth.dependencies import require_admin
+from agent_graph.app.models.auth_schema import CurrentUser
 
 logger = logging.getLogger(__name__)
 

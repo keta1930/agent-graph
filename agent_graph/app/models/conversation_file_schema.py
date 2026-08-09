@@ -2,7 +2,7 @@
 会话文件管理相关的Schema定义
 """
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class FileVersion(BaseModel):
@@ -65,7 +65,7 @@ class CreateFileRequest(BaseModel):
     content: str = Field(..., description="文件内容")
     log: str = Field(..., description="操作日志", max_length=200)
 
-    @validator('filename')
+    @field_validator('filename')
     def validate_filename(cls, v):
         """验证文件名"""
         # 禁止路径穿越
@@ -80,7 +80,7 @@ class CreateFileRequest(BaseModel):
 
         return v
 
-    @validator('content')
+    @field_validator('content')
     def validate_content_size(cls, v):
         """验证内容大小"""
         # 限制单文件最大5MB
@@ -97,7 +97,7 @@ class SaveFileRequest(BaseModel):
     summary: str = Field(..., description="文件摘要", max_length=500)
     log: str = Field(..., description="操作日志", max_length=200)
 
-    @validator('content')
+    @field_validator('content')
     def validate_content_size(cls, v):
         """验证内容大小"""
         max_size = 5 * 1024 * 1024  # 5MB

@@ -7,9 +7,9 @@ import json
 import logging
 from typing import Dict, List, Any, Optional, AsyncGenerator
 
-from app.services.model.model_service import model_service
-from app.services.tool_execution import ToolExecutor
-from app.services.system_tools import get_system_tools_by_names
+from agent_graph.app.services.model.model_service import model_service
+from agent_graph.app.services.tool_execution import ToolExecutor
+from agent_graph.app.services.system_tools import get_system_tools_by_names
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +53,8 @@ class AgentStreamExecutor:
             SSE 格式字符串 "data: {...}\\n\\n"
         """
         try:
-            from app.infrastructure.database.mongodb.client import mongodb_client
-            from app.services.system_tools.registry import set_user_language_context
+            from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+            from agent_graph.app.services.system_tools.registry import set_user_language_context
 
             # 获取用户语言并设置到上下文
             user_language = await mongodb_client.user_repository.get_user_language(user_id)
@@ -173,8 +173,8 @@ class AgentStreamExecutor:
         Returns:
             完整的消息列表
         """
-        from app.infrastructure.database.mongodb.client import mongodb_client
-        from app.infrastructure.storage.object_storage.conversation_image_manager import conversation_image_manager
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.infrastructure.storage.object_storage.conversation_image_manager import conversation_image_manager
 
         messages = []
 
@@ -329,7 +329,7 @@ class AgentStreamExecutor:
                 "max_iterations": int
             }
         """
-        from app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
 
         config = {
             "agent_name": "manual",
@@ -539,7 +539,7 @@ class AgentStreamExecutor:
                 logger.info(f"Agent {agent_name} - 执行 {len(current_tool_calls)} 个工具调用")
 
                 # 检查是否有流式系统工具调用
-                from app.services.system_tools import is_streaming_tool
+                from agent_graph.app.services.system_tools import is_streaming_tool
                 has_streaming_tool = any(
                     is_streaming_tool(tc.get("function", {}).get("name"))
                     for tc in current_tool_calls
@@ -642,7 +642,7 @@ class AgentStreamExecutor:
 
         # 加载 MCP 工具
         if mcp_servers:
-            from app.services.mcp.mcp_service import mcp_service
+            from agent_graph.app.services.mcp.mcp_service import mcp_service
             try:
                 mcp_tools = await mcp_service.prepare_chat_tools(mcp_servers)
                 tools.extend(mcp_tools)
@@ -691,7 +691,7 @@ class AgentStreamExecutor:
             return None
 
         try:
-            from app.infrastructure.database.mongodb.client import mongodb_client
+            from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
 
             # 确保 conversations 元数据存在
             conversation = await mongodb_client.conversation_repository.get_conversation(conversation_id)

@@ -53,11 +53,11 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
     """
     try:
         # 获取当前用户语言
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         # 获取所有已有的分类
-        from app.services.agent.agent_service import agent_service
+        from agent_graph.app.services.agent.agent_service import agent_service
         
         categories_data = await agent_service.list_categories(user_id)
         categories = [cat.get("category") for cat in categories_data if cat.get("category")]
@@ -91,7 +91,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"get_agent_spec 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         if language == "en":

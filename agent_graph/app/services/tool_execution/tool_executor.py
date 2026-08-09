@@ -8,9 +8,9 @@ import json
 import logging
 from typing import Dict, List, Any, Optional
 
-from app.services.tool_execution.mcp_tool_executor import MCPToolExecutor
-from app.services.tool_execution.system_tool_executor import SystemToolExecutor
-from app.services.tool_execution.handoffs_tool_executor import HandoffsToolExecutor
+from agent_graph.app.services.tool_execution.mcp_tool_executor import MCPToolExecutor
+from agent_graph.app.services.tool_execution.system_tool_executor import SystemToolExecutor
+from agent_graph.app.services.tool_execution.handoffs_tool_executor import HandoffsToolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ class ToolExecutor:
                 yield result
             elif self.system_executor.can_handle(tool_name):
                 # 检查是否为流式系统工具
-                from app.services.system_tools import is_streaming_tool
+                from agent_graph.app.services.system_tools import is_streaming_tool
                 if is_streaming_tool(tool_name):
                     # 流式系统工具
                     logger.info(f"使用 SystemToolExecutor 执行（流式）: {tool_name}")

@@ -65,11 +65,11 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
         }
     """
     try:
-        from app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
-        from app.services.task.task_service import task_service
-        from app.services.task.task_scheduler import task_scheduler
-        from app.models.task_schema import TaskCreate
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
+        from agent_graph.app.services.task.task_service import task_service
+        from agent_graph.app.services.task.task_scheduler import task_scheduler
+        from agent_graph.app.models.task_schema import TaskCreate
+        from agent_graph.app.services.system_tools.registry import get_current_language
         import os
 
         # 获取当前用户语言
@@ -296,7 +296,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"register_task 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         return {
             "success": False,

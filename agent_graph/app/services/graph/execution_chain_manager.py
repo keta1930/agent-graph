@@ -56,7 +56,7 @@ class ExecutionChainManager:
         conversation["execution_chain"] = execution_chain
 
         # 同步到数据库
-        from app.infrastructure.database.mongodb import mongodb_client
+        from agent_graph.app.infrastructure.database.mongodb import mongodb_client
         await mongodb_client.update_graph_run_execution_chain(
             conversation["conversation_id"], 
             execution_chain

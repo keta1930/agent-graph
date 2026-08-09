@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
 from fastapi import UploadFile
 
-from app.models.prompt_schema import (
+from agent_graph.app.models.prompt_schema import (
     PromptCreate, PromptUpdate, PromptInfo, PromptDetail,
     PromptList, PromptImportByFileRequest, PromptExportRequest
 )

@@ -207,7 +207,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
         }
     """
     try:
-        from app.services.system_tools.registry import get_tools_by_category, get_current_language
+        from agent_graph.app.services.system_tools.registry import get_tools_by_category, get_current_language
 
         # 获取当前语言
         language = get_current_language()
@@ -265,7 +265,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
         logger.error(f"list_system_tools 执行失败: {str(e)}")
         
         # 根据语言返回错误消息
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         if language == "en":

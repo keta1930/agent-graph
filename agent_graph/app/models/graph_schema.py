@@ -1,10 +1,10 @@
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 class AgentNode(BaseModel):
     """Graph节点配置，支持Agent调用与参数覆盖"""
     # 节点标识
-    name: str = Field(..., description="节点名称")
+    name: str = Field(description="节点名称")
     description: Optional[str] = Field(default="", description="节点描述")
 
     # Agent配置
@@ -32,66 +32,56 @@ class AgentNode(BaseModel):
     position: Optional[Dict[str, float]] = Field(default=None, description="节点在画布中的位置")
     level: Optional[int] = Field(default=None, description="节点在图中的层级，用于确定执行顺序")
 
-    @validator('name')
-    def name_must_be_valid(cls, v):
-        if not v or '/' in v or '\\' in v or '.' in v:
+    @field_validator("name")
+    @classmethod
+    def name_must_be_valid(cls, value: str) -> str:
+        if not value or "/" in value or "\\" in value or "." in value:
             raise ValueError('名称不能包含特殊字符 (/, \\, .)')
-        return v
+        return value
 
-    @validator('model_name')
-    def validate_model_name(cls, v, values):
-        is_subgraph = values.get('is_subgraph', False)
-        agent_name = values.get('agent_name')
-        node_name = values.get('name', '')
+    @model_validator(mode="after")
+    def validate_execution_config(self) -> "AgentNode":
+        self.model_name = self.model_name.strip() if self.model_name else None
+        if not self.is_subgraph and not self.agent_name and not self.model_name:
+            raise ValueError(
+                f"节点 '{self.name}' 必须提供 agent_name 或 model_name"
+            )
+        if self.is_subgraph and not self.subgraph_name:
+            raise ValueError(f"子图节点 '{self.name}' 必须指定子图名称")
+        return self
 
-        # 子图节点不需要验证
-        if is_subgraph:
-            return v
+    @field_validator("max_iterations")
+    @classmethod
+    def validate_max_iterations(cls, value: int | None) -> int | None:
+        if value is not None and not 1 <= value <= 200:
+            raise ValueError("max_iterations 必须在 1-200 范围内")
+        return value
 
-        # 清理 model_name
-        model_name = v.strip() if v else None
-
-        # 普通节点：必须提供 agent_name 或 model_name
-        if not agent_name and not model_name:
-            raise ValueError(f"节点 '{node_name}' 必须提供 agent_name 或 model_name")
-
-        return model_name
-
-    @validator('subgraph_name')
-    def validate_subgraph_name(cls, v, values):
-        if values.get('is_subgraph', False) and not v and values.get('name'):
-            raise ValueError(f"子图节点 '{values['name']}' 必须指定子图名称")
-        return v
-
-    @validator('max_iterations')
-    def validate_max_iterations(cls, v):
-        if v is not None and (v < 1 or v > 200):
-            raise ValueError('max_iterations 必须在 1-200 范围内')
-        return v
-
-    @validator('level')
-    def validate_level(cls, v):
-        if v is None:
+    @field_validator("level", mode="before")
+    @classmethod
+    def validate_level(cls, value: object) -> int | None:
+        if value is None:
             return None
         try:
-            return int(v)
+            return int(value)
         except (ValueError, TypeError):
             return None
 
 
 class GraphConfig(BaseModel):
     """图配置"""
-    name: str = Field(..., description="图名称")
+    name: str = Field(description="图名称")
     description: str = Field(default="", description="图描述")
     nodes: List[AgentNode] = Field(default_factory=list, description="节点列表")
     end_template: Optional[str] = Field(default=None, description="终止节点输出模板")
     readme: Optional[str] = Field(default=None, description="图的README文档")
 
-    @validator('name')
-    def name_must_be_valid(cls, v):
-        if not v or '/' in v or '\\' in v or '.' in v:
+    @field_validator("name")
+    @classmethod
+    def name_must_be_valid(cls, value: str) -> str:
+        if not value or "/" in value or "\\" in value or "." in value:
             raise ValueError('名称不能包含特殊字符 (/, \\, .)')
-        return v
+        return value
 
 class GraphInput(BaseModel):
     """图执行输入"""
@@ -100,6 +90,16 @@ class GraphInput(BaseModel):
     conversation_id: Optional[str] = Field(None, description="会话ID，用于继续现有会话")
     continue_from_checkpoint: bool = Field(default=False, description="是否从断点继续执行")
     background: bool = Field(default=False, description="是否后台执行，默认为False使用SSE模式")
+
+
+class MCPGenerationResponse(BaseModel):
+    """描述 Graph 对应的 MCP server 脚本。"""
+
+    graph_name: str
+    sequential_script: str | None = None
+    default_script: str | None = None
+    script: str | None = None
+    error: str | None = None
 
 class GraphFilePath(BaseModel):
     file_path: str
@@ -116,7 +116,7 @@ class GraphGenerationRequest(BaseModel):
 
 class GraphGenerationResponse(BaseModel):
     """图生成响应"""
-    status: str = Field(..., description="响应状态：success 或 error")
+    status: str = Field(description="响应状态：success 或 error")
     message: Optional[str] = Field(None, description="响应消息")
     conversation_id: Optional[str] = Field(None, description="对话ID")
     graph_name: Optional[str] = Field(None, description="生成的图名称")
@@ -132,21 +132,21 @@ class PromptTemplateRequest(BaseModel):
 
 class CreateVersionRequest(BaseModel):
     """创建版本请求"""
-    commit_message: str = Field(..., description="提交信息（类似 Git commit message）", min_length=1)
+    commit_message: str = Field(description="提交信息（类似 Git commit message）", min_length=1)
 
 class CreateVersionResponse(BaseModel):
     """创建版本响应"""
-    status: str = Field(..., description="状态")
-    message: str = Field(..., description="消息")
+    status: str = Field(description="状态")
+    message: str = Field(description="消息")
     version_id: Optional[str] = Field(None, description="MinIO版本ID")
     version_count: Optional[int] = Field(None, description="当前版本总数")
 
 class GraphVersionRecord(BaseModel):
     """图版本记录"""
-    version_id: str = Field(..., description="MinIO版本ID")
-    commit_message: str = Field(..., description="提交信息")
-    created_at: str = Field(..., description="创建时间（ISO格式）")
-    size: int = Field(..., description="配置文件大小（字节）")
+    version_id: str = Field(description="MinIO版本ID")
+    commit_message: str = Field(description="提交信息")
+    created_at: str = Field(description="创建时间（ISO格式）")
+    size: int = Field(description="配置文件大小（字节）")
 
 class GraphVersionListResponse(BaseModel):
     """版本列表响应"""

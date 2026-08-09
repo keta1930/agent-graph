@@ -115,7 +115,7 @@ class UserInitializationFactory:
     async def _create_default_models(self, user_id: str, language: str = "en") -> Dict[str, Any]:
         """创建默认模型配置（从 JSON 文件加载）"""
         try:
-            from app.services.model.model_service import model_service
+            from agent_graph.app.services.model.model_service import model_service
 
             models_data = self._load_json_templates(language, "models")
 
@@ -150,7 +150,7 @@ class UserInitializationFactory:
     async def _create_default_agents(self, user_id: str, language: str = "en") -> Dict[str, Any]:
         """创建默认 Agent（从 JSON 文件加载）"""
         try:
-            from app.services.agent.agent_service import agent_service
+            from agent_graph.app.services.agent.agent_service import agent_service
 
             agents_data = self._load_json_templates(language, "agents")
 
@@ -186,7 +186,7 @@ class UserInitializationFactory:
     async def _create_default_graphs(self, user_id: str, language: str = "en") -> Dict[str, Any]:
         """创建默认 Graph（从 JSON 文件加载）"""
         try:
-            from app.services.graph.graph_service import graph_service
+            from agent_graph.app.services.graph.graph_service import graph_service
 
             graphs_data = self._load_json_templates(language, "graphs")
 
@@ -222,8 +222,8 @@ class UserInitializationFactory:
     async def _create_default_prompts(self, user_id: str, language: str = "en") -> Dict[str, Any]:
         """创建默认 Prompt（从 JSON 文件加载）"""
         try:
-            from app.models.prompt_schema import PromptCreate
-            from app.services.prompt.prompt_service import prompt_service
+            from agent_graph.app.models.prompt_schema import PromptCreate
+            from agent_graph.app.services.prompt.prompt_service import prompt_service
 
             prompts_data = self._load_json_templates(language, "prompts")
 
@@ -299,7 +299,7 @@ class UserInitializationFactory:
                     files_list = documents.get("files", [])
 
                     if files_list and files_dir.exists():
-                        from app.infrastructure.storage.object_storage.conversation_document_manager import ConversationDocumentManager
+                        from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import ConversationDocumentManager
                         doc_manager = ConversationDocumentManager()
 
                         for file_meta in files_list:

@@ -6,7 +6,7 @@
 import logging
 from fastapi import APIRouter, HTTPException, status, Depends
 
-from app.models.auth_schema import (
+from agent_graph.app.models.auth_schema import (
     UserRegisterRequest,
     UserLoginRequest,
     RefreshTokenRequest,
@@ -14,10 +14,10 @@ from app.models.auth_schema import (
     UserProfile,
     MessageResponse
 )
-from app.auth.dependencies import get_current_user
-from app.auth.jwt import create_tokens, verify_refresh_token
-from app.services.user.user_service import UserService
-from app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.auth.jwt import create_tokens, verify_refresh_token
+from agent_graph.app.services.user.user_service import UserService
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
 
 logger = logging.getLogger(__name__)
 

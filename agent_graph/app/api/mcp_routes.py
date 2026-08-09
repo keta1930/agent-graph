@@ -3,15 +3,15 @@ import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import Dict, List, Any
-from app.infrastructure.storage.file_storage import FileManager
-from app.services.mcp.mcp_service import mcp_service
-from app.infrastructure.database.mongodb import mongodb_client
-from app.models.mcp_schema import (
+from agent_graph.app.infrastructure.storage.file_storage import FileManager
+from agent_graph.app.services.mcp.mcp_service import mcp_service
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.models.mcp_schema import (
     MCPToolRegistration, MCPToolTestRequest, MCPToolTestResponse,
     MCPConfigWithVersion, MCPServerAddRequest, MCPServerRemoveRequest
 )
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ async def get_mcp_config(current_user: CurrentUser = Depends(get_current_user)):
 async def update_mcp_config(request: MCPConfigWithVersion, current_user: CurrentUser = Depends(get_current_user)):
     """更新团队MCP配置并重新连接服务器"""
     try:
-        config_dict = request.config.dict()
+        config_dict = request.config.model_dump()
         expected_version = request.version
 
         # 获取当前配置以保留provider信息
@@ -153,7 +153,7 @@ async def add_mcp_server(request: MCPServerAddRequest, current_user: CurrentUser
                 duplicate_servers.append(server_name)
             else:
                 try:
-                    normalized_config = server_config.dict()
+                    normalized_config = server_config.model_dump()
                     # 添加provider信息
                     normalized_config['provider_user_id'] = current_user.user_id
                     normalized_config['created_at'] = datetime.now().isoformat()

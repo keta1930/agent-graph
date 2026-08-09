@@ -2,10 +2,10 @@ import asyncio
 import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
-from app.infrastructure.database.mongodb.repositories import TaskRepository
-from app.infrastructure.database.mongodb import mongodb_client
-from app.models.task_schema import TaskCreate
-from app.services.graph.graph_service import graph_service
+from agent_graph.app.infrastructure.database.mongodb.repositories import TaskRepository
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.models.task_schema import TaskCreate
+from agent_graph.app.services.graph.graph_service import graph_service
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class TaskService:
                 raise Exception("任务管理器未初始化")
 
             # 转换为字典格式
-            task_data = task_create.dict()
+            task_data = task_create.model_dump()
 
             # 验证图是否存在（使用任务所属用户的user_id验证）
             graph_doc = await graph_service.get_graph(task_create.graph_name, user_id=task_data.get("user_id", user_id))

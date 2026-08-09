@@ -63,8 +63,8 @@ async def handler(user_id: str, prompt_name: str, **kwargs) -> Dict[str, Any]:
         }
     """
     try:
-        from app.services.prompt.prompt_service import prompt_service
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.prompt.prompt_service import prompt_service
+        from agent_graph.app.services.system_tools.registry import get_current_language
 
         # 获取当前语言
         language = get_current_language()
@@ -99,7 +99,7 @@ async def handler(user_id: str, prompt_name: str, **kwargs) -> Dict[str, Any]:
         logger.error(f"get_prompt_content 执行失败 (prompt_name={prompt_name}): {str(e)}")
         
         # 根据语言返回错误消息
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         if language == "en":

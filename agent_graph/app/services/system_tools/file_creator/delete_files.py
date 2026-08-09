@@ -63,10 +63,10 @@ TOOL_SCHEMA = {
 async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
     """删除文件，支持从conversation或project删除"""
     try:
-        from app.infrastructure.database.mongodb.client import mongodb_client
-        from app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
-        from app.infrastructure.storage.object_storage.project_document_manager import project_document_manager
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+        from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
+        from agent_graph.app.infrastructure.storage.object_storage.project_document_manager import project_document_manager
+        from agent_graph.app.services.system_tools.registry import get_current_language
 
         # 获取当前用户语言
         language = get_current_language()
@@ -158,7 +158,7 @@ async def handler(user_id: str, **kwargs) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"delete_files 执行失败: {str(e)}")
-        from app.services.system_tools.registry import get_current_language
+        from agent_graph.app.services.system_tools.registry import get_current_language
         language = get_current_language()
         
         if language == "en":

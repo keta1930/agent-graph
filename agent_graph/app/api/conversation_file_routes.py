@@ -11,9 +11,9 @@ from fastapi import APIRouter, HTTPException, Depends, Path, Query, BackgroundTa
 from fastapi.responses import Response, FileResponse
 from urllib.parse import unquote
 
-from app.models.auth_schema import CurrentUser
-from app.auth.dependencies import get_current_user
-from app.models.conversation_file_schema import (
+from agent_graph.app.models.auth_schema import CurrentUser
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.conversation_file_schema import (
     FileListResponse,
     FileDetailResponse,
     FileVersionResponse,
@@ -23,7 +23,7 @@ from app.models.conversation_file_schema import (
     DeleteFileResponse,
     DownloadAllRequest
 )
-from app.services.conversation.conversation_document_service import conversation_document_service
+from agent_graph.app.services.conversation.conversation_document_service import conversation_document_service
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +44,8 @@ async def list_files(
     返回文件名列表（含路径），如果会话属于项目，还会返回项目的共享文件
     """
     try:
-        from app.infrastructure.database.mongodb import mongodb_client
-        from app.services.project import project_document_service
+        from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+        from agent_graph.app.services.project import project_document_service
 
         # 获取conversation文件
         result = await conversation_document_service.get_all_files(
@@ -367,7 +367,7 @@ async def push_file_to_project(
     将conversation中的文件复制到project
     """
     try:
-        from app.services.project import project_document_service
+        from agent_graph.app.services.project import project_document_service
 
         result = await project_document_service.push_file_from_conversation(
             conversation_id=conversation_id,

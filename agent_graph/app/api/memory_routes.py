@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import StreamingResponse, JSONResponse
 import io
 
-from app.models.memory_schema import (
+from agent_graph.app.models.memory_schema import (
     AddMemoryRequest,
     UpdateMemoryRequest,
     ImportMemoryRequest,
@@ -20,9 +20,9 @@ from app.models.memory_schema import (
     GetMemoriesResponse,
     BatchDeleteResponse
 )
-from app.services.memory.memory_service import memory_service
-from app.auth.dependencies import get_current_user
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.services.memory.memory_service import memory_service
+from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.models.auth_schema import CurrentUser
 
 logger = logging.getLogger(__name__)
 

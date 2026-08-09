@@ -6,8 +6,8 @@ from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.executors.asyncio import AsyncIOExecutor
-from app.models.task_schema import TaskStatus
-from app.services.task.task_service import task_service
+from agent_graph.app.models.task_schema import TaskStatus
+from agent_graph.app.services.task.task_service import task_service
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +257,7 @@ class TaskScheduler:
                     schedule_config = task.get("schedule_config", {})
                     execute_at = schedule_config.get("execute_at") if schedule_config else None
                     if schedule_type == "single" and execute_at and execute_at <= datetime.now():
-                        from app.models.task_schema import TaskStatus
+                        from agent_graph.app.models.task_schema import TaskStatus
                         await task_service.update_task_status(task.get("id"), TaskStatus.ERROR)
                         logger.warning(f"发现过期的单次任务 {task.get('id')}（执行时间 {execute_at}），状态已标记为 error，跳过调度")
                         continue

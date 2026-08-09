@@ -7,8 +7,8 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from app.auth.jwt import verify_token
-from app.models.auth_schema import CurrentUser
+from agent_graph.app.auth.jwt import verify_token
+from agent_graph.app.models.auth_schema import CurrentUser
 
 
 # 定义HTTPBearer认证scheme

@@ -5,8 +5,8 @@ Prompt 服务主文件
 import logging
 from typing import Dict, Any, List
 
-from app.infrastructure.database.mongodb import mongodb_client
-from app.models.prompt_schema import (
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.models.prompt_schema import (
     PromptCreate, PromptUpdate, PromptImportByFileRequest,
     PromptExportRequest, PromptBatchDeleteRequest
 )
@@ -103,7 +103,7 @@ class PromptService:
             return {
                 "success": True,
                 "message": "获取提示词列表成功",
-                "data": prompt_list.dict()
+                "data": prompt_list.model_dump()
             }
         except Exception as e:
             logger.error(f"提示词服务：列出提示词失败 (user: {user_id}): {e}")

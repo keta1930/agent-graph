@@ -5,9 +5,10 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import logging
 import subprocess
-from app.core.config import settings
+from agent_graph.app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class FileManager:
@@ -50,8 +51,8 @@ class FileManager:
         """列出所有AI生成的MCP工具"""
         try:
             tools = []
-            if settings.MCP_TOOLS_DIR.exists():
-                for d in settings.MCP_TOOLS_DIR.glob("*/"):
+            if settings.mcp_tools_dir.exists():
+                for d in settings.mcp_tools_dir.glob("*/"):
                     if d.is_dir():
                         tools.append(d.name)
             return sorted(tools)

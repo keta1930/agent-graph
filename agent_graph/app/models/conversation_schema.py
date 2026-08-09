@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 class TokenUsage(BaseModel):
     """Token使用量统计"""
@@ -21,7 +21,7 @@ class ConversationListItem(BaseModel):
     tags: List[str] = Field(default_factory=list, description="标签列表")
     project_id: Optional[str] = Field(None, description="所属Project ID")
 
-    @validator('type')
+    @field_validator('type')
     def validate_type(cls, v):
         """验证对话类型只能是 agent 或 graph"""
         valid_types = ["agent", "graph"]
@@ -46,7 +46,7 @@ class InputConfig(BaseModel):
     selected_system_tools: Optional[List[str]] = Field(None, description="选择的系统工具")
     max_iterations: Optional[int] = Field(None, description="最大迭代次数")
 
-    @validator('max_iterations')
+    @field_validator('max_iterations')
     def validate_max_iterations(cls, v):
         if v is not None and (v < 1 or v > 200):
             raise ValueError('max_iterations 必须在 1-200 范围内')
@@ -89,7 +89,7 @@ class UpdateConversationTagsRequest(BaseModel):
     tags: List[str] = Field(..., description="新的标签列表")
     user_id: str = Field(default="default_user", description="用户ID")
 
-    @validator('tags')
+    @field_validator('tags')
     def validate_tags(cls, v):
         """验证标签格式"""
         if len(v) > 10:
@@ -110,14 +110,14 @@ class ConversationCompactRequest(BaseModel):
     compact_threshold: int = Field(default=2000, description="压缩阈值，超过此长度的tool content将被压缩")
     user_id: str = Field(default="default_user", description="用户ID")
 
-    @validator('compact_type')
+    @field_validator('compact_type')
     def validate_compact_type(cls, v):
         """验证压缩类型"""
         if v not in ['precise', 'brutal']:
             raise ValueError('压缩类型只能是 precise 或 brutal')
         return v
 
-    @validator('compact_threshold')
+    @field_validator('compact_threshold')
     def validate_compact_threshold(cls, v):
         """验证压缩阈值"""
         if v < 100:
@@ -142,7 +142,7 @@ class UpdateConversationStatusRequest(BaseModel):
     status: str = Field(..., description="新状态：active（活跃）/ deleted（软删除）/ favorite（收藏）")
     user_id: str = Field(default="default_user", description="用户ID")
 
-    @validator('status')
+    @field_validator('status')
     def validate_status(cls, v):
         """验证状态值"""
         valid_statuses = ["active", "deleted", "favorite"]

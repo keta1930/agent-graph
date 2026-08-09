@@ -4,8 +4,8 @@
 """
 import logging
 from typing import Dict, Any, Optional, List
-from app.infrastructure.database.mongodb.client import mongodb_client
-from app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
+from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
+from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
 
 logger = logging.getLogger(__name__)
 

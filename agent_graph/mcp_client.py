@@ -3,7 +3,8 @@ import logging
 import os
 import traceback
 import subprocess
-from contextlib import AsyncExitStack
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Dict, Any, Optional
 import uvicorn
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -12,20 +13,36 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
-from app.core.config import settings
+from agent_graph.app.core.config import get_settings
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+
+settings = get_settings()
+
 logger = logging.getLogger("mcp_client")
 
-app = FastAPI(title="MCP Client", description="MCP Client for Agent-Graph")
-
-# 全局状态
 SERVERS = {}
 CONFIG = {}
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """管理 MCP server 连接的生命周期。"""
+    logger.info("MCP 客户端启动")
+    try:
+        yield
+    finally:
+        logger.info("MCP 客户端关闭")
+        await asyncio.gather(
+            *(server.cleanup() for server in SERVERS.values()),
+            return_exceptions=True,
+        )
+
+
+app = FastAPI(
+    title="MCP Client",
+    description="MCP Client for Agent-Graph",
+    lifespan=lifespan,
+)
 
 
 class MCPServer:
@@ -103,7 +120,7 @@ class MCPServer:
     async def _start_ai_process(self) -> bool:
         """启动AI生成的MCP工具进程"""
         try:
-            from app.infrastructure.storage.file_storage import FileManager
+            from agent_graph.app.infrastructure.storage.file_storage import FileManager
             
             # 获取脚本路径和虚拟环境Python路径
             script_path = FileManager.get_mcp_tool_main_script(self.name)
@@ -717,26 +734,7 @@ async def _perform_client_shutdown():
     except Exception as e:
         logger.error(f"执行客户端关闭流程时出错: {str(e)}")
 
-@app.on_event("startup")
-async def startup_event():
-    """启动事件"""
-    logger.info("MCP客户端启动...")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """关闭事件"""
-    logger.info("MCP客户端关闭...")
-
-    cleanup_tasks = []
-    for server in SERVERS.values():
-        cleanup_tasks.append(server.cleanup())
-
-    if cleanup_tasks:
-        await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-
-
-def run_client(host="127.0.0.1", port=8765):
+def run_client(host: str, port: int) -> None:
     """运行客户端"""
     uvicorn.run(app, host=host, port=port)
 
@@ -745,8 +743,13 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="MCP Client for Agent-Graph")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind")
-    parser.add_argument("--port", type=int, default=8765, help="Port to bind")
+    parser.add_argument("--host", default=settings.mcp_client_host, help="Host to bind")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=settings.mcp_client_port,
+        help="Port to bind",
+    )
 
     args = parser.parse_args()
 

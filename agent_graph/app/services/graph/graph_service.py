@@ -4,17 +4,17 @@ import copy
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Set, Tuple, AsyncGenerator
 import os
-from app.infrastructure.storage.file_storage import FileManager
-from app.services.mcp.mcp_service import mcp_service
-from app.services.model.model_service import model_service
-from app.services.prompt.prompt_service import prompt_service
-from app.services.graph.graph_processor import GraphProcessor
-from app.services.graph.conversation_manager import ConversationManager
-from app.services.graph.graph_executor import GraphExecutor
-from app.utils.sse_helper import SSEHelper
-from app.services.graph.background_executor import BackgroundExecutor
-from app.infrastructure.database.mongodb import mongodb_client
-from app.infrastructure.storage.object_storage.graph_config_version_manager import graph_config_version_manager
+from agent_graph.app.infrastructure.storage.file_storage import FileManager
+from agent_graph.app.services.mcp.mcp_service import mcp_service
+from agent_graph.app.services.model.model_service import model_service
+from agent_graph.app.services.prompt.prompt_service import prompt_service
+from agent_graph.app.services.graph.graph_processor import GraphProcessor
+from agent_graph.app.services.graph.conversation_manager import ConversationManager
+from agent_graph.app.services.graph.graph_executor import GraphExecutor
+from agent_graph.app.utils.sse_helper import SSEHelper
+from agent_graph.app.services.graph.background_executor import BackgroundExecutor
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.infrastructure.storage.object_storage.graph_config_version_manager import graph_config_version_manager
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +299,7 @@ class GraphService:
         """后台异步执行图，执行到创建conversation_id后立即返回，图在后台继续运行"""
         try:
             # 设置用户语言上下文（用于system tools的多语言支持）
-            from app.services.system_tools.registry import set_user_language_context
+            from agent_graph.app.services.system_tools.registry import set_user_language_context
             user_language = await self.mongodb_client.user_repository.get_user_language(user_id)
             set_user_language_context(user_language)
             logger.info(f"设置用户语言上下文: user_id={user_id}, language={user_language}")
@@ -353,7 +353,7 @@ class GraphService:
         """执行整个图并返回流式结果"""
         try:
             # 设置用户语言上下文（用于system tools的多语言支持）
-            from app.services.system_tools.registry import set_user_language_context
+            from agent_graph.app.services.system_tools.registry import set_user_language_context
             user_language = await self.mongodb_client.user_repository.get_user_language(user_id)
             set_user_language_context(user_language)
             logger.info(f"设置用户语言上下文: user_id={user_id}, language={user_language}")
@@ -397,7 +397,7 @@ class GraphService:
                 return
 
             # 设置用户语言上下文（用于system tools的多语言支持）
-            from app.services.system_tools.registry import set_user_language_context
+            from agent_graph.app.services.system_tools.registry import set_user_language_context
             user_id = conversation.get("user_id", "default_user")
             user_language = await self.mongodb_client.user_repository.get_user_language(user_id)
             set_user_language_context(user_language)
@@ -470,8 +470,8 @@ class GraphService:
         """初始化任务管理组件"""
         try:
             # 延迟导入以避免循环导入
-            from app.services.task.task_service import task_service
-            from app.services.task.task_scheduler import task_scheduler
+            from agent_graph.app.services.task.task_service import task_service
+            from agent_graph.app.services.task.task_scheduler import task_scheduler
 
             self._task_service = task_service
             self._task_scheduler = task_scheduler

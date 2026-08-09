@@ -6,8 +6,8 @@
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional
-from app.auth.password import hash_password, verify_password, validate_password_strength
-from app.services.user.user_initialization_factory import UserInitializationFactory
+from agent_graph.app.auth.password import hash_password, verify_password, validate_password_strength
+from agent_graph.app.services.user.user_initialization_factory import UserInitializationFactory
 
 logger = logging.getLogger(__name__)
 

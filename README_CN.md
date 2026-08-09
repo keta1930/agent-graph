@@ -57,13 +57,13 @@ cd agent-graph
 #### 2.2. 配置并启动 Docker 服务
 
 ```bash
-cd docker/agent_graph_services
 cp .env.example .env
-# 编辑 .env 文件配置必要参数（详见安装文档）
-docker-compose up -d
+# 启动前设置所有留空的凭据和密钥
+python agent_graph/scripts/generate_jwt_secret.py
+docker compose --env-file .env -f docker/docker-compose.yml up -d
 ```
 
-**服务地址：**
+**默认服务地址：**
 - MongoDB Express (数据库管理): http://localhost:20041
 - MinIO 控制台 (文件存储): http://localhost:20043
 
@@ -71,28 +71,24 @@ docker-compose up -d
 
 **使用 uv (推荐):**
 ```bash
-cd ../..  # 返回项目根目录
 uv sync
-cd agent_graph
-uv run python main.py
+uv run --env-file .env fastapi run
 ```
 
 **使用 pip:**
 ```bash
-cd ../..  # 返回项目根目录
 pip install -r requirements.txt
-cd agent_graph
-python main.py
+dotenv -f .env run -- fastapi run
 ```
 
 **后台运行:**
 ```bash
-nohup python main.py > app.log 2>&1 &
+nohup uv run --env-file .env fastapi run > app.log 2>&1 &
 ```
 
 #### 2.4. 访问应用
 
-打开浏览器访问: **http://localhost:20050**
+打开 `PUBLIC_API_BASE_URL` 配置的地址（默认：**http://localhost:20050**）。
 
 **登录页面（管理员直接用`.env`配置的用户名密码登录）:**
 
@@ -113,7 +109,7 @@ nohup python main.py > app.log 2>&1 &
 ```bash
 cd frontend
 npm install
-npm run dev  # 开发服务器: http://localhost:20051
+npm run dev  # 使用根目录 .env 中的 FRONTEND_PORT
 npm run build  # 构建生产版本
 ```
 

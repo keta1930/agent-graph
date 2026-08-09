@@ -21,12 +21,11 @@ git clone https://github.com/keta1930/agent-graph.git
 cd agent-graph
 ```
 
-### 2. 配置 Docker 服务
+### 2. 配置环境
 
-Docker 服务提供 MongoDB 数据库和 MinIO 对象存储。
+项目根目录下的单个 `.env` 文件同时配置后端和 Docker 服务（MongoDB 和 MinIO）。
 
 ```bash
-cd docker/agent_graph_services
 cp .env.example .env
 ```
 
@@ -34,73 +33,83 @@ cp .env.example .env
 
 | 配置项 | 说明 | 示例 |
 |--------|------|------|
-| MONGO_ROOT_USERNAME | MongoDB 管理员用户名 | admin |
-| MONGO_ROOT_PASSWORD | MongoDB 管理员密码 | strongpassword123 |
-| MONGO_DATABASE | MongoDB 数据库名称 | agent-graph |
+| PORT | FastAPI 监听端口 | 20050 |
+| PUBLIC_API_BASE_URL | 生成外部集成时使用的后端公开地址 | http://127.0.0.1:20050 |
+| MCP_CLIENT_HOST | 内部 MCP client 监听地址 | 127.0.0.1 |
+| MCP_CLIENT_PORT | 内部 MCP client 端口 | 20052 |
+| FRONTEND_HOST | Vite 开发及预览服务监听地址 | 0.0.0.0 |
+| FRONTEND_PORT | Vite 开发及预览服务端口 | 20051 |
+| BACKEND_PROXY_HOST | Vite 开发代理连接的后端主机 | 127.0.0.1 |
+| FRONTEND_ALLOWED_HOSTS | Vite 开发服务器允许的 Host | localhost,127.0.0.1 |
+| CORS_ORIGINS | 允许的浏览器 Origin（逗号分隔） | http://localhost:20051 |
+| MONGODB_URL | 后端使用的 MongoDB 连接 URL（凭据须与 MONGO_ROOT_* 一致） | mongodb://admin:strongpassword123@localhost:20040/ |
+| MONGODB_DB | 后端 MongoDB 数据库名称 | agent-graph |
+| MONGO_ROOT_USERNAME | MongoDB 管理员用户名（容器初始化） | admin |
+| MONGO_ROOT_PASSWORD | MongoDB 管理员密码（容器初始化） | strongpassword123 |
+| MONGO_DATABASE | 首次初始化 MongoDB 时创建的数据库 | agent-graph |
 | MONGO_PORT | MongoDB 服务端口 | 20040 |
 | MONGO_EXPRESS_PORT | 数据库管理界面端口 | 20041 |
 | MONGO_EXPRESS_USERNAME | Mongo Express 管理界面用户名 | admin |
 | MONGO_EXPRESS_PASSWORD | Mongo Express 管理界面密码 | strongpassword123 |
-| MINIO_ROOT_USER | MinIO 管理员用户名 | minioadmin |
-| MINIO_ROOT_PASSWORD | MinIO 管理员密码 | minioadmin123 |
+| MINIO_ENDPOINT | 后端使用的 MinIO 端点（host:port） | localhost:20042 |
+| MINIO_ACCESS_KEY | MinIO 访问密钥（须与 MINIO_ROOT_USER 一致） | minioadmin |
+| MINIO_SECRET_KEY | MinIO 密钥（须与 MINIO_ROOT_PASSWORD 一致） | minioadmin123 |
+| MINIO_ROOT_USER | MinIO 管理员用户名（容器初始化） | minioadmin |
+| MINIO_ROOT_PASSWORD | MinIO 管理员密码（容器初始化） | minioadmin123 |
 | MINIO_API_PORT | MinIO API 端口 | 20042 |
 | MINIO_CONSOLE_PORT | MinIO 控制台端口 | 20043 |
 | MINIO_SECURE | MinIO 客户端是否启用 TLS | false |
-| JWT_SECRET_KEY | 认证安全密钥 | 使用脚本生成 |
+| JWT_SECRET_KEY | 认证安全密钥（至少 32 字符） | 使用脚本生成 |
 | JWT_ALGORITHM | JWT 签名算法 | HS256 |
 | JWT_ACCESS_TOKEN_EXPIRE_MINUTES | Access Token 有效期（分钟） | 15 |
 | JWT_REFRESH_TOKEN_EXPIRE_DAYS | Refresh Token 有效期（天） | 7 |
 | ADMIN_USERNAME | 超级管理员用户名 | admin |
-| ADMIN_PASSWORD | 超级管理员密码 | securepassword |
+| ADMIN_PASSWORD | 超级管理员密码（至少 12 字符） | securepassword |
 
-**生成 JWT 密钥：** 运行 `python agent_graph/scripts/generate_jwt_secret.py` 生成安全的 JWT 密钥。
+`.env.example` 中留空的值均为必填项。运行 `python agent_graph/scripts/generate_jwt_secret.py` 生成 `JWT_SECRET_KEY`，并在启动任何服务前设置唯一密码。
+
+> **注意：** `PORT` 应与 `PUBLIC_API_BASE_URL` 一致，`FRONTEND_PORT` 应与 `CORS_ORIGINS` 一致；后端存储端点也必须与对应的 Docker 凭据和端口一致。
 
 ### 3. 启动 Docker 服务
 
 ```bash
-docker-compose up -d
+docker compose --env-file .env -f docker/docker-compose.yml up -d
 ```
 
-验证服务运行状态:
+使用示例端口时，可通过以下地址验证服务：
 
 - MongoDB Express: http://localhost:20041
 - MinIO 控制台: http://localhost:20043
 
 ### 4. 部署后端
 
-返回项目根目录并安装后端依赖:
+安装后端依赖:
 
 **使用 uv (推荐):**
 
 ```bash
-cd ../..  # 返回项目根目录
 uv sync
 
-# 启动后端服务
-cd agent_graph
-uv run python main.py
+uv run --env-file .env fastapi run
 ```
 
 **使用 pip:**
 
 ```bash
-cd ../..  # 返回项目根目录
 pip install -r requirements.txt
 
-# 启动后端服务
-cd agent_graph
-python main.py
+dotenv -f .env run -- fastapi run
 ```
 
 如需后台运行，使用:
 
 ```bash
-nohup python main.py > app.log 2>&1 &
+nohup uv run --env-file .env fastapi run > app.log 2>&1 &
 ```
 
 ### 5. 访问应用
 
-打开浏览器，访问:
+打开 `PUBLIC_API_BASE_URL` 配置的地址（示例值为）：
 
 **http://localhost:20050**
 
@@ -135,7 +144,7 @@ nohup python main.py > app.log 2>&1 &
 | Docker 服务启动失败 | 检查端口是否被占用,验证 Docker 是否运行 |
 | 后端连接错误 | 验证 MongoDB 和 MinIO 是否运行,检查 `.env` 配置 |
 | 无法登录 | 验证 `.env` 文件中的管理员凭据与登录信息匹配 |
-| 后端端口已被占用 | 修改 `agent_graph/main.py` 中的端口（默认：20050） |
+| 后端或前端端口被占用 | 修改 `.env` 中的 `PORT` 或 `FRONTEND_PORT`，并同步相关 URL/Origin 配置 |
 
 ## 开发者指南
 
@@ -155,7 +164,7 @@ npm install
 npm run dev
 ```
 
-开发服务器将在 http://localhost:20051 启动，支持热重载。
+开发服务器使用根目录 `.env` 中的 `FRONTEND_HOST` 和 `FRONTEND_PORT`。
 
 **构建前端:**
 
@@ -174,7 +183,7 @@ npm run build
 在生产环境中，请考虑以下额外步骤:
 
 1. **安全性:**
-   - 修改 `.env` 中的所有默认密码
+   - 将 `.env.example` 中留空的凭据全部设置为唯一值
    - 使用强 JWT 密钥 (最少 32 个字符)
    - 配置防火墙规则限制访问
    - 使用反向代理 (nginx/Caddy) 配置 HTTPS

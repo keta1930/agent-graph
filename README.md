@@ -57,13 +57,13 @@ cd agent-graph
 #### 2.2. Configure and Start Docker Services
 
 ```bash
-cd docker/agent_graph_services
 cp .env.example .env
-# Edit .env file to configure necessary parameters (see installation documentation)
-docker-compose up -d
+# Set all blank credentials and secrets before startup
+python agent_graph/scripts/generate_jwt_secret.py
+docker compose --env-file .env -f docker/docker-compose.yml up -d
 ```
 
-**Service Addresses:**
+**Default Service Addresses:**
 - MongoDB Express (Database Management): http://localhost:20041
 - MinIO Console (File Storage): http://localhost:20043
 
@@ -71,28 +71,24 @@ docker-compose up -d
 
 **Using uv (Recommended):**
 ```bash
-cd ../..  # Return to project root
 uv sync
-cd agent_graph
-uv run python main.py
+uv run --env-file .env fastapi run
 ```
 
 **Using pip:**
 ```bash
-cd ../..  # Return to project root
 pip install -r requirements.txt
-cd agent_graph
-python main.py
+dotenv -f .env run -- fastapi run
 ```
 
 **Run in Background:**
 ```bash
-nohup python main.py > app.log 2>&1 &
+nohup uv run --env-file .env fastapi run > app.log 2>&1 &
 ```
 
 #### 2.4. Access Application
 
-Open browser and visit: **http://localhost:20050**
+Open the address configured by `PUBLIC_API_BASE_URL` (default: **http://localhost:20050**).
 
 **Login Page (Admin login with username and password configured in `.env`):**
 
@@ -113,7 +109,7 @@ If you need to modify frontend code:
 ```bash
 cd frontend
 npm install
-npm run dev  # Development server: http://localhost:20051
+npm run dev  # Uses FRONTEND_PORT from the root .env
 npm run build  # Build production version
 ```
 

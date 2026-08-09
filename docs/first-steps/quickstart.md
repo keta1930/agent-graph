@@ -2,7 +2,7 @@
 
 ## For Administrators: Team Management
 
-Visit the Admin Panel at `http://localhost:20050/admin` to manage your team and invite collaborators.
+Open `/admin` under `PUBLIC_API_BASE_URL` to manage your team and invite collaborators.
 
 ### 1. Create Invite Codes
 

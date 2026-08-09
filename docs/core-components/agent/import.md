@@ -131,4 +131,4 @@ Detailed results for each agent include:
 
 - **[Agent Configuration](config.md)** - Learn about configuration fields
 - **[Build First Agent](first-agent.md)** - Create agents manually
-- **[Model Management](../model/index.md)** - Configure available models
+- **[Model Management](../model/register.md)** - Configure available models

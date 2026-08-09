@@ -150,4 +150,4 @@
 
 - **[MCP Inspector](inspector.zh.md)** - 在智能体中使用前测试工具
 - **[使用智能体构建](build-with-agent.zh.md)** - 创建自定义 MCP 服务器
-- **[在智能体中使用](../agent/config.zh.md#mcp-服务器)** - 将服务器附加到智能体
+- **[在智能体中使用](../agent/config.zh.md#mcp)** - 将服务器附加到智能体

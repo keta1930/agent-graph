@@ -152,4 +152,4 @@ After adding a server:
 
 - **[MCP Inspector](inspector.md)** - Test tools before using in agents
 - **[Build with Agent](build-with-agent.md)** - Create custom MCP servers
-- **[Use in Agent](../agent/config.md#mcp-servers)** - Attach servers to agents
+- **[Use in Agent](../agent/config.md#mcp)** - Attach servers to agents

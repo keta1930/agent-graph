@@ -33,6 +33,8 @@ cp .env.example .env
 
 | 配置项 | 说明 | 示例 |
 |--------|------|------|
+| APP_NAME | FastAPI 对外显示的应用名称 | Agent-Graph |
+| APP_VERSION | FastAPI 对外显示的应用版本 | 3.0.0 |
 | PORT | FastAPI 监听端口 | 20050 |
 | PUBLIC_API_BASE_URL | 生成外部集成时使用的后端公开地址 | http://127.0.0.1:20050 |
 | MCP_CLIENT_HOST | 内部 MCP client 监听地址 | 127.0.0.1 |
@@ -54,6 +56,7 @@ cp .env.example .env
 | MINIO_ENDPOINT | 后端使用的 MinIO 端点（host:port） | localhost:20042 |
 | MINIO_ACCESS_KEY | MinIO 访问密钥（须与 MINIO_ROOT_USER 一致） | minioadmin |
 | MINIO_SECRET_KEY | MinIO 密钥（须与 MINIO_ROOT_PASSWORD 一致） | minioadmin123 |
+| MINIO_BUCKET_NAME | 应用存储对象使用的 bucket | agent-graph |
 | MINIO_ROOT_USER | MinIO 管理员用户名（容器初始化） | minioadmin |
 | MINIO_ROOT_PASSWORD | MinIO 管理员密码（容器初始化） | minioadmin123 |
 | MINIO_API_PORT | MinIO API 端口 | 20042 |
@@ -153,7 +156,7 @@ nohup uv run --env-file .env fastapi run > app.log 2>&1 &
 ### 前端开发环境
 
 **系统要求:**
-- Node.js 16+
+- Node.js 18.x、20.x 或 22+
 - npm 7+
 
 **步骤:**

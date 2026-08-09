@@ -23,7 +23,7 @@ This directory contains the documentation for the Agent-Graph platform.
 
 1. Install dependencies:
    ```bash
-   pip install mkdocs mkdocs-material mkdocs-git-revision-date-localized-plugin mkdocs-awesome-pages-plugin pymdown-extensions
+   pip install mkdocs-material mkdocs-git-revision-date-localized-plugin mkdocs-static-i18n
    ```
 
 2. Serve locally:
@@ -36,7 +36,7 @@ This directory contains the documentation for the Agent-Graph platform.
 ### Building Static Site
 
 ```bash
-mkdocs build
+mkdocs build --strict
 ```
 
 The static site will be generated in the `site/` directory.
@@ -60,11 +60,8 @@ When adding new documentation:
 4. Add diagrams using Mermaid when helpful
 5. Keep content clear and concise
 
-## Version Management
+## Deployment
 
-Documentation versions are managed using `mike`. To deploy a new version:
+The GitHub Pages workflow builds and deploys the site when documentation sources, `mkdocs.yml`, or the workflow itself change on `master` or `main`. It can also be started manually with `workflow_dispatch`.
 
-```bash
-mike deploy --push --update-aliases VERSION_NUMBER latest
-mike set-default --push latest
-```
+The workflow definition is `.github/workflows/docs.yml`.

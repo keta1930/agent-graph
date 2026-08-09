@@ -31,7 +31,7 @@ Graphs provide visual workflow orchestration, allowing you to design and execute
 ### Models
 Agent-Graph supports various LLM models. Configure and manage your AI models through the model management system.
 
-[Learn more about Models →](model/index.md)
+[Learn more about Models →](model/register.md)
 
 ### Memory
 Agent-Graph provides both short-term and long-term memory systems for agents and users.
@@ -61,7 +61,7 @@ Share conversations with teammates and export them for analysis or documentation
 ### Multi-User & Team
 Manage teams, create invite codes, and collaborate with multiple users.
 
-[Learn more about Teams →](team/index.md)
+[Learn more about Teams →](team/manage.md)
 
 ---
 

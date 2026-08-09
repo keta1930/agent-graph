@@ -49,5 +49,5 @@ MCP Inspector 是测试界面,用于:
 ## 下一步
 
 - **[添加 MCP 服务器](first-server.zh.md)** - 连接更多服务器
-- **[在智能体中使用](../agent/config.zh.md#mcp-服务器)** - 将测试过的工具附加到智能体
+- **[在智能体中使用](../agent/config.zh.md#mcp)** - 将测试过的工具附加到智能体
 - **[构建自定义服务器](build-with-agent.zh.md)** - 创建自己的 MCP 工具

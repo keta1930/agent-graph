@@ -2,6 +2,8 @@ site_name: Agent-Graph Documentation
 site_url: https://keta1930.github.io/agent-graph/
 site_description: Building Your AI Agents with Agent-Graph
 site_author: Agent-Graph Team
+exclude_docs: |
+  README.md
 
 repo_name: agent-graph
 repo_url: https://github.com/keta1930/agent-graph
@@ -52,9 +54,6 @@ theme:
     - content.tooltips
     - navigation.expand
     - navigation.indexes
-    - navigation.instant
-    - navigation.instant.prefetch
-    - navigation.instant.progress
     - navigation.path
     - navigation.sections
     - navigation.tabs
@@ -144,9 +143,6 @@ plugins:
       enable_creation_date: true
       type: datetime
       fallback_to_build_date: true
-  - awesome-pages:
-      collapse_single_pages: false
-
 # Extensions
 markdown_extensions:
   # Python Markdown
@@ -200,10 +196,6 @@ extra:
       link: /agent-graph/zh/
       lang: zh
 
-  version:
-    provider: mike
-    default: stable
-
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/keta1930/agent-graph
@@ -225,6 +217,7 @@ nav:
   - Quickstart: first-steps/quickstart.md
 
   - Core Components:
+    - core-components/index.md
 
     - Agent:
       - core-components/agent/index.md
@@ -252,6 +245,7 @@ nav:
       - Multi-model: core-components/model/multi-model.md
 
     - Memory:
+        - core-components/memory/index.md
         - Short-term: core-components/memory/short-term.md
         - Long-term:
             - Agent Memory: core-components/memory/long-term/agent-memory.md

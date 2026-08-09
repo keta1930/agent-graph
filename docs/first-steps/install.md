@@ -33,6 +33,8 @@ Edit the `.env` file with your configuration:
 
 | Configuration | Description | Example |
 |---------------|-------------|---------|
+| APP_NAME | Application name exposed by FastAPI | Agent-Graph |
+| APP_VERSION | Application version exposed by FastAPI | 3.0.0 |
 | PORT | FastAPI listen port | 20050 |
 | PUBLIC_API_BASE_URL | Externally reachable backend URL used by generated integrations | http://127.0.0.1:20050 |
 | MCP_CLIENT_HOST | Internal MCP client bind address | 127.0.0.1 |
@@ -54,6 +56,7 @@ Edit the `.env` file with your configuration:
 | MINIO_ENDPOINT | MinIO endpoint used by backend (host:port) | localhost:20042 |
 | MINIO_ACCESS_KEY | MinIO access key (must match MINIO_ROOT_USER) | minioadmin |
 | MINIO_SECRET_KEY | MinIO secret key (must match MINIO_ROOT_PASSWORD) | minioadmin123 |
+| MINIO_BUCKET_NAME | Bucket used for application-managed objects | agent-graph |
 | MINIO_ROOT_USER | MinIO admin username (container init) | minioadmin |
 | MINIO_ROOT_PASSWORD | MinIO admin password (container init) | minioadmin123 |
 | MINIO_API_PORT | MinIO API port | 20042 |
@@ -153,7 +156,7 @@ If you want to modify the frontend code, you can run the frontend development se
 ### Frontend Development Setup
 
 **Requirements:**
-- Node.js 16+
+- Node.js 18.x, 20.x, or 22+
 - npm 7+
 
 **Steps:**

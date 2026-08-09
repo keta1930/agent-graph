@@ -24,18 +24,17 @@ classifiers = [
 ]
 dependencies = [
     "aiohttp",
-    "asyncio==3.4.3",
-    "bs4",
-    "fastapi",
+    "fastapi[standard]>=0.141.1,<0.142.0",
     "fastmcp==2.8",
     "langchain",
     "mcp[cli]==1.9.4",
     "openai",
     "pydantic[email]",
+    "pydantic-settings>=2.9.1",
+    "python-dotenv>=1.0.0",
     "pyzmq",
     "requests",
     "typing-extensions",
-    "uvicorn",
     "websockets",
     "notebook",
     "pandas",
@@ -43,7 +42,6 @@ dependencies = [
     "matplotlib",
     "tqdm",
     "python-multipart>=0.0.20",
-    "starlette>=0.46.2",
     "motor>=3.7.1",
     "minio>=7.2.16",
     "apscheduler>=3.11.0",
@@ -52,7 +50,9 @@ dependencies = [
     "openpyxl>=3.1.0",
     "sqlalchemy>=2.0.40",
     "python-jose[cryptography]>=3.5.0",
-    "passlib[bcrypt]>=1.7.4"
+    "passlib[bcrypt]>=1.7.4",
+    "asyncer>=0.0.8",
+    "beautifulsoup4>=4.13.4",
 ]
 
 [project.urls]
@@ -60,12 +60,61 @@ Documentation = "https://github.com/keta1930/agent-graph#readme"
 Issues = "https://github.com/keta1930/agent-graph/issues"
 Source = "https://github.com/keta1930/agent-graph"
 
+[tool.fastapi]
+entrypoint = "agent_graph.main:app"
+
 [tool.hatch.build.targets.wheel]
 packages = ["agent_graph"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"agent_graph/dist" = "agent_graph/dist"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "agent_graph",
     "README.md",
     "LICENSE",
+]
+
+[tool.hatch.build.targets.sdist.force-include]
+"agent_graph/dist" = "agent_graph/dist"
+
+[dependency-groups]
+dev = [
+    "coverage>=7.15.3",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "pytest-mock>=3.15.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+pythonpath = ["."]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "slow: 标记为慢速测试",
+    "integration: 标记为集成测试",
+    "unit: 标记为单元测试",
+]
+
+[tool.coverage.run]
+source = ["agent_graph"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
 ]

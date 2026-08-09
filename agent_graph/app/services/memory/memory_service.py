@@ -652,7 +652,6 @@ class MemoryService:
             response = await model_service.call_model(
                 model_name=model_name,
                 messages=[{"role": "user", "content": prompt}],
-                tools= None,
                 user_id=user_id
             )
 

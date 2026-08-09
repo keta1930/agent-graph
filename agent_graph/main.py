@@ -1,93 +1,74 @@
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, status, Request
+
+from asyncer import asyncify
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from agent_graph.app.api.routes import router
-from agent_graph.app.services.mcp.mcp_service import mcp_service
-from agent_graph.app.services.model.model_service import model_service
-from agent_graph.app.services.graph.graph_service import graph_service
-from agent_graph.app.infrastructure.database.mongodb import mongodb_client
-from agent_graph.app.infrastructure.storage.file_storage import FileManager
 from agent_graph.app.core.config import get_settings
 from agent_graph.app.core.initialization import initialize_system
+from agent_graph.app.infrastructure.database.mongodb import mongodb_client
+from agent_graph.app.infrastructure.storage.file_storage import FileManager
+from agent_graph.app.infrastructure.storage.object_storage.minio_client import (
+    minio_client,
+)
+from agent_graph.app.services.graph.graph_service import graph_service
+from agent_graph.app.services.mcp.mcp_service import mcp_service
+from agent_graph.app.services.model.model_service import model_service
+
 
 settings = get_settings()
-
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger("agent_graph")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """应用生命周期管理"""
-    logger.info("Starting Agent-Graph application...")
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """管理应用依赖的初始化与清理。"""
+    logger.info("Starting Agent-Graph application")
 
     try:
-        # 1. 确保目录存在
-        logger.info(f"配置目录: {settings.agent_graph_dir}")
+        logger.info("配置目录: %s", settings.agent_graph_dir)
         settings.ensure_directories()
 
-        # 2. 连接MongoDB
+        await asyncify(minio_client.initialize)(settings)
+        logger.info("MinIO connected successfully")
+
         await mongodb_client.initialize(settings.mongodb_url, settings.mongodb_db)
         logger.info("MongoDB connected successfully")
 
-        # 3. 执行系统初始化（创建超级管理员、团队）
         await initialize_system()
-        logger.info("System initialization completed")
-
-        # 4. 初始化文件系统
         FileManager.initialize()
-        logger.info("文件系统初始化成功")
-
-        # 5. 初始化模型服务
         await model_service.initialize(mongodb_client)
-        logger.info("模型服务初始化成功")
-
-        # 6. 初始化图服务
         await graph_service.initialize()
-        logger.info("图服务初始化成功")
-
-        # 7. 初始化MCP服务 - 启动客户端进程
         await mcp_service.initialize()
-        logger.info("MCP服务初始化成功")
 
         logger.info("所有服务初始化完成")
-
         yield
-
-    except Exception as e:
-        logger.error(f"Failed to initialize application: {str(e)}")
-        import traceback
-        traceback.print_exc()
+    except Exception:
+        logger.exception("Failed to initialize application")
         raise
     finally:
-        logger.info("Shutting down Agent-Graph application...")
+        logger.info("Shutting down Agent-Graph application")
 
         try:
-            # 清理MCP服务
             await mcp_service.cleanup()
-            logger.info("MCP服务清理完成")
-        except Exception as e:
-            logger.error(f"清理MCP服务时出错: {str(e)}")
+            logger.info("MCP 服务清理完成")
+        except Exception:
+            logger.exception("清理 MCP 服务时出错")
 
         try:
-            # 断开MongoDB连接
             await mongodb_client.disconnect()
-            logger.info("MongoDB连接已断开")
-        except Exception as e:
-            logger.error(f"断开MongoDB连接时出错: {str(e)}")
+            logger.info("MongoDB 连接已断开")
+        except Exception:
+            logger.exception("断开 MongoDB 连接时出错")
 
 
-# 创建应用（使用lifespan）
 app = FastAPI(
     title="Agent-Graph",
     description="通过MCP+Graph构建Agent系统的工具",

@@ -10,10 +10,7 @@ import base64
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
 from io import BytesIO
-from agent_graph.app.core.config import get_settings
 from agent_graph.app.infrastructure.storage.object_storage.minio_client import minio_client
-
-settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +21,6 @@ class ConversationImageManager:
     STORAGE_PREFIX = "conversation_image"
     MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
     SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
-
-    def __init__(self):
-        """初始化会话图片管理器"""
-        pass
 
     def _get_object_name(self, user_id: str, conversation_id: str, filename: str) -> str:
         """
@@ -128,8 +121,8 @@ class ConversationImageManager:
         try:
             image_stream = BytesIO(image_data)
             await asyncio.to_thread(
-                minio_client._client.put_object,
-                bucket_name=settings.minio_bucket_name,
+                minio_client.client.put_object,
+                bucket_name=minio_client.bucket_name,
                 object_name=minio_path,
                 data=image_stream,
                 length=len(image_data),
@@ -154,8 +147,8 @@ class ConversationImageManager:
             Optional[bytes]: 图片二进制数据，失败返回 None
         """
         try:
-            response = minio_client._client.get_object(
-                bucket_name=settings.minio_bucket_name,
+            response = minio_client.client.get_object(
+                bucket_name=minio_client.bucket_name,
                 object_name=minio_path
             )
 
@@ -204,8 +197,8 @@ class ConversationImageManager:
             bool: 是否删除成功
         """
         try:
-            minio_client._client.remove_object(
-                bucket_name=settings.minio_bucket_name,
+            minio_client.client.remove_object(
+                bucket_name=minio_client.bucket_name,
                 object_name=minio_path
             )
 
@@ -231,8 +224,8 @@ class ConversationImageManager:
             prefix = f"{self.STORAGE_PREFIX}/{user_id}/{conversation_id}/"
 
             # 列出所有图片
-            objects = minio_client._client.list_objects(
-                bucket_name=settings.minio_bucket_name,
+            objects = minio_client.client.list_objects(
+                bucket_name=minio_client.bucket_name,
                 prefix=prefix,
                 recursive=True
             )
@@ -241,8 +234,8 @@ class ConversationImageManager:
             count = 0
             for obj in objects:
                 try:
-                    minio_client._client.remove_object(
-                        bucket_name=settings.minio_bucket_name,
+                    minio_client.client.remove_object(
+                        bucket_name=minio_client.bucket_name,
                         object_name=obj.object_name
                     )
                     count += 1

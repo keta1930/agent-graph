@@ -674,7 +674,7 @@ export function useSSEConnection() {
   }, [closeConnection]);
 
   return {
-    streamingState: enhancedStreamingState, // 为了向后兼容，保持接口名称
+    streamingState: enhancedStreamingState,
     enhancedStreamingState,
     startConnection,
     closeConnection,

@@ -1,0 +1,41 @@
+name: Real backend browser acceptance
+on:
+  push:
+    paths: ['frontend/**', 'agent_graph/**', 'tests/e2e/**', 'pyproject.toml', 'uv.lock', '.github/workflows/real-e2e.yml']
+  pull_request:
+    paths: ['frontend/**', 'agent_graph/**', 'tests/e2e/**', 'pyproject.toml', 'uv.lock', '.github/workflows/real-e2e.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.9.29'
+          python-version: '3.13'
+      - run: uv sync --locked
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run typecheck:e2e
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-e2e-safe-evidence
+          path: .file/e2e/*/artifacts/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore

@@ -4,7 +4,7 @@ from typing import Dict, Any, List
 from urllib.parse import unquote
 
 from agent_graph.app.services.model.model_service import model_service
-from agent_graph.app.models.model_schema import ModelConfig
+from agent_graph.app.models.model_schema import ModelConfig, ModelConfigUpdate
 from agent_graph.app.auth.dependencies import get_current_user
 from agent_graph.app.models.auth_schema import CurrentUser
 
@@ -82,7 +82,7 @@ async def add_model(model: ModelConfig, current_user: CurrentUser = Depends(get_
 
 
 @router.put("/models/{model_name:path}", response_model=Dict[str, Any])
-async def update_model(model_name: str, model: ModelConfig, current_user: CurrentUser = Depends(get_current_user)):
+async def update_model(model_name: str, model: ModelConfigUpdate, current_user: CurrentUser = Depends(get_current_user)):
     """更新模型配置"""
     try:
         model_name = unquote(model_name)

@@ -149,6 +149,16 @@ class ModelService:
             bool: 是否成功
         """
         try:
+            model_config = dict(model_config)
+            if not model_config.get("api_key"):
+                existing = await self.model_config_repository.get_model(
+                    model_name, user_id=user_id, include_api_key=True
+                )
+                if existing is None:
+                    return False
+                # 先解析保留的密钥，保证新客户端与仓储使用相同值。
+                model_config["api_key"] = existing["api_key"]
+
             client = AsyncOpenAI(
                 api_key=model_config["api_key"],
                 base_url=model_config["base_url"]

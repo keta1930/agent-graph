@@ -110,6 +110,12 @@ class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ModelConfigUpdate(ModelConfig):
+    """模型更新配置；省略、null 或空字符串密钥时保留原值。"""
+
+    api_key: Optional[str] = Field(default=None, description="新API密钥；省略、null或空字符串时保持原值")
+
+
 class ModelConfigList(BaseModel):
     """模型配置列表"""
     models: List[ModelConfig] = Field(default_factory=list)

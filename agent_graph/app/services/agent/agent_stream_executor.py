@@ -5,11 +5,14 @@ Agent 流式执行器
 import asyncio
 import json
 import logging
+from contextlib import aclosing
 from typing import Dict, List, Any, Optional, AsyncGenerator
+from fastapi import HTTPException
 
 from agent_graph.app.services.model.model_service import model_service
 from agent_graph.app.services.tool_execution import ToolExecutor
 from agent_graph.app.services.system_tools import get_system_tools_by_names
+from agent_graph.app.services.conversation.execution_guard import get_execution_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,7 @@ class AgentStreamExecutor:
         Yields:
             SSE 格式字符串 "data: {...}\\n\\n"
         """
+        conversation = await get_execution_conversation(conversation_id, user_id, "agent")
         try:
             from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
             from agent_graph.app.services.system_tools.registry import set_user_language_context
@@ -80,7 +84,6 @@ class AgentStreamExecutor:
                 return
 
             # 获取conversation的project_id并追加project instruction
-            conversation = await mongodb_client.conversation_repository.get_conversation(conversation_id)
             if conversation and conversation.get("project_id"):
                 project_id = conversation.get("project_id")
                 project_instruction = await mongodb_client.get_project_instruction(project_id, user_id)
@@ -114,7 +117,7 @@ class AgentStreamExecutor:
 
             # 执行完整流程
             final_result = None
-            async for item in self.run_agent_loop(
+            async with aclosing(self.run_agent_loop(
                     agent_name=effective_config["agent_name"],
                     model_name=effective_config["model_name"],
                     messages=messages,
@@ -123,13 +126,14 @@ class AgentStreamExecutor:
                     max_iterations=effective_config["max_iterations"],
                     user_id=user_id,
                     conversation_id=conversation_id
-            ):
-                if isinstance(item, str):
-                    # SSE 字符串，直接转发给客户端
-                    yield item
-                else:
-                    # Dict 结果，保存但不转发到客户端
-                    final_result = item
+            )) as agent_loop:
+                async for item in agent_loop:
+                    if isinstance(item, str):
+                        # SSE 字符串，直接转发给客户端
+                        yield item
+                    else:
+                        # Dict 结果，保存但不转发到客户端
+                        final_result = item
 
             # 保存执行结果到数据库（is_graph_node 默认为 False）
             if final_result:
@@ -148,6 +152,8 @@ class AgentStreamExecutor:
             # 发送完成信号
             yield "data: [DONE]\n\n"
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"run_agent_stream 失败: {str(e)}")
             error_msg = {"error": str(e)}

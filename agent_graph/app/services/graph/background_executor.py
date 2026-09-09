@@ -1,5 +1,7 @@
 import asyncio
 import logging
+from fastapi import HTTPException
+from agent_graph.app.services.conversation.execution_guard import get_execution_conversation
 from typing import Dict, Any, Optional
 from agent_graph.app.services.graph.graph_helper import GraphHelper
 from agent_graph.app.services.graph.handoffs_manager import HandoffsManager
@@ -56,8 +58,10 @@ class BackgroundExecutor:
             }
 
     async def continue_conversation_background(self, conversation_id: str, input_text: str = None,
-                                               model_service=None) -> Dict[str, Any]:
+                                               model_service=None, *, user_id: str,
+                                               continue_from_checkpoint: bool = False) -> Dict[str, Any]:
         """后台继续现有会话"""
+        await get_execution_conversation(conversation_id, user_id, "graph")
         try:
             conversation = await self.conversation_manager.get_conversation(conversation_id)
             if not conversation:
@@ -66,10 +70,7 @@ class BackgroundExecutor:
                     "message": f"找不到会话 '{conversation_id}'"
                 }
 
-            # Get user_id from conversation
-            user_id = conversation.get("user_id", "default_user")
-
-            if input_text:
+            if input_text and not continue_from_checkpoint:
                 # 重置会话状态并记录新输入
                 previous_rounds = [r for r in conversation.get("rounds", []) if r.get("node_name") == "start"]
                 conversation["rounds"] = previous_rounds
@@ -90,6 +91,8 @@ class BackgroundExecutor:
                 "message": "会话已在后台继续执行"
             }
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"后台继续会话时出错: {str(e)}")
             return {

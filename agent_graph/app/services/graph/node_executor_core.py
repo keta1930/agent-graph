@@ -37,7 +37,7 @@ class NodeExecutorCore:
             node: 节点配置
             conversation_id: 会话ID
             yield_sse: 是否yield SSE消息（True=stream模式，False=background模式）
-            user_id: 用户ID（可选，将从conversation中获取）
+            user_id: 执行入口传入的调用者用户ID
 
         Yields:
             如果yield_sse=True: yield SSE消息字符串
@@ -48,9 +48,6 @@ class NodeExecutorCore:
             conversation = await self.conversation_manager.get_conversation(conversation_id)
             if not conversation:
                 raise Exception(f"找不到会话 '{conversation_id}'")
-
-            # 从 conversation 中获取 user_id，如果没有则使用传入的参数
-            actual_user_id = conversation.get("user_id", user_id)
 
             node_name = node["name"]
             node_level = node.get("level", 0)
@@ -63,7 +60,7 @@ class NodeExecutorCore:
             # 2. 加载有效配置（智能合并 Agent 配置和 Node 配置）
             effective_config = await self.agent_stream_executor._load_effective_config(
                 agent_name=node.get("agent_name"),
-                user_id=actual_user_id,
+                user_id=user_id,
                 model_name=node.get("model_name"),
                 system_prompt=node.get("system_prompt"),
                 mcp_servers=node.get("mcp_servers"),
@@ -120,7 +117,7 @@ class NodeExecutorCore:
                 tools=all_tools,
                 mcp_servers=mcp_servers,
                 max_iterations=max_iterations,
-                user_id=actual_user_id,
+                user_id=user_id,
                 conversation_id=conversation_id,
                 task_id=None,
                 is_graph_node=True

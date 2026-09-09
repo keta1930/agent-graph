@@ -1,4 +1,6 @@
 import logging
+from fastapi import HTTPException
+from agent_graph.app.services.conversation.execution_guard import get_execution_conversation
 from typing import Dict, Any, Optional, AsyncGenerator
 from agent_graph.app.utils.sse_helper import SSEHelper
 from agent_graph.app.services.graph.graph_helper import GraphHelper
@@ -69,16 +71,15 @@ class GraphExecutor:
                                            conversation_id: str,
                                            input_text: str = None,
                                            model_service=None,
-                                           continue_from_checkpoint: bool = False) -> AsyncGenerator[str, None]:
+                                           continue_from_checkpoint: bool = False,
+                                           *, user_id: str) -> AsyncGenerator[str, None]:
         """继续现有会话并返回流式结果"""
+        await get_execution_conversation(conversation_id, user_id, "graph")
         try:
             conversation = await self.conversation_manager.get_conversation(conversation_id)
             if not conversation:
                 yield SSEHelper.send_error(f"找不到会话 '{conversation_id}'")
                 return
-
-            # Get user_id from conversation
-            user_id = conversation.get("user_id", "default_user")
 
             if continue_from_checkpoint or not input_text:
                 resumption_info = await self.conversation_manager.check_execution_resumption_point(conversation_id)
@@ -124,6 +125,8 @@ class GraphExecutor:
 
             yield SSEHelper.send_graph_complete(final_output, execution_chain)
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"继续会话流式处理时出错: {str(e)}")
             yield SSEHelper.send_error(f"继续会话时出错: {str(e)}")

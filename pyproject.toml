@@ -53,6 +53,7 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "asyncer>=0.0.8",
     "beautifulsoup4>=4.13.4",
+    "anyio==4.9.0",
 ]
 
 [project.urls]

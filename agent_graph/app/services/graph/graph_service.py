@@ -4,6 +4,8 @@ import copy
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Set, Tuple, AsyncGenerator
 import os
+from fastapi import HTTPException
+from agent_graph.app.services.conversation.execution_guard import get_execution_conversation
 from agent_graph.app.infrastructure.storage.file_storage import FileManager
 from agent_graph.app.services.mcp.mcp_service import mcp_service
 from agent_graph.app.services.model.model_service import model_service
@@ -295,8 +297,11 @@ class GraphService:
     async def execute_graph_background(self, graph_name: str, input_text: str,
                                        graph_config: Dict[str, Any],
                                        conversation_id: Optional[str] = None,
-                                       user_id: str = "default_user") -> Dict[str, Any]:
+                                       *, user_id: str,
+                                       continue_from_checkpoint: bool = False) -> Dict[str, Any]:
         """后台异步执行图，执行到创建conversation_id后立即返回，图在后台继续运行"""
+        if conversation_id:
+            await get_execution_conversation(conversation_id, user_id, "graph")
         try:
             # 设置用户语言上下文（用于system tools的多语言支持）
             from agent_graph.app.services.system_tools.registry import set_user_language_context
@@ -323,7 +328,8 @@ class GraphService:
 
                 # 使用后台执行器继续会话
                 result = await self.background_executor.continue_conversation_background(
-                    conversation_id, input_text, model_service
+                    conversation_id, input_text, model_service,
+                    user_id=user_id, continue_from_checkpoint=continue_from_checkpoint
                 )
                 return result
             else:
@@ -341,6 +347,8 @@ class GraphService:
                 )
                 return result
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"启动后台执行失败: {str(e)}")
             return {
@@ -388,8 +396,10 @@ class GraphService:
     async def continue_conversation_stream(self,
                                            conversation_id: str,
                                            input_text: str = None,
-                                           continue_from_checkpoint: bool = False) -> AsyncGenerator[str, None]:
+                                           continue_from_checkpoint: bool = False,
+                                           *, user_id: str) -> AsyncGenerator[str, None]:
         """继续现有会话并返回流式结果"""
+        await get_execution_conversation(conversation_id, user_id, "graph")
         try:
             conversation = await self.conversation_manager.get_conversation(conversation_id)
             if not conversation:
@@ -398,7 +408,6 @@ class GraphService:
 
             # 设置用户语言上下文（用于system tools的多语言支持）
             from agent_graph.app.services.system_tools.registry import set_user_language_context
-            user_id = conversation.get("user_id", "default_user")
             user_language = await self.mongodb_client.user_repository.get_user_language(user_id)
             set_user_language_context(user_language)
             logger.info(f"设置用户语言上下文: user_id={user_id}, language={user_language}")
@@ -407,7 +416,6 @@ class GraphService:
             if input_text and not continue_from_checkpoint:
                 logger.info("继续会话需要预处理图配置中的提示词引用")
                 original_config = conversation.get("graph_config", {})
-                user_id = conversation.get("user_id", "default_user")
                 preprocessed_config = await self._preprocess_graph_prompts(original_config, user_id)
 
                 # 更新会话中的图配置为预处理后的版本
@@ -417,12 +425,15 @@ class GraphService:
                     conversation_id,
                     input_text,
                     model_service,
-                    continue_from_checkpoint
+                    continue_from_checkpoint,
+                    user_id=user_id
             ):
                 yield sse_data
 
             await self.conversation_manager.update_conversation_file(conversation_id)
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"继续会话流式处理时出错: {str(e)}")
             yield SSEHelper.send_error(f"继续会话时出错: {str(e)}")

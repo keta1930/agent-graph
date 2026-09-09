@@ -5,14 +5,18 @@ Agent 运行服务
 import json
 import logging
 import asyncio
+from anyio import move_on_after
 from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
 from fastapi import HTTPException, status, UploadFile
 from agent_graph.app.services.agent.file_handler import file_handler
 from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
 from agent_graph.app.services.conversation.title_service import generate_title_and_tags
+from agent_graph.app.services.conversation.execution_guard import get_execution_conversation
 
 logger = logging.getLogger(__name__)
+TITLE_WAIT_TIMEOUT = 3.0
+STREAM_CLEANUP_TIMEOUT = 3.0
 
 
 class AgentRunService:
@@ -105,24 +109,24 @@ class AgentRunService:
             对于其他类型的会话，请使用 conversation_repository.ensure_conversation_exists()
         """
 
-        # 验证 project 权限（如有）
+        # 生成或使用现有 conversation_id
+        conversation_id = conversation_id or str(ObjectId())
+
+        # 检查对话是否已存在
+        existing_conversation = await get_execution_conversation(
+            conversation_id, user_id, "agent", allow_missing=True
+        )
+        is_new_conversation = (existing_conversation is None)
+
+        # 目标会话授权后再验证 project 权限。
         if project_id:
             project = await mongodb_client.get_project(project_id, user_id)
             if not project:
                 raise ValueError(f"Project 不存在或无权限访问: {project_id}")
 
-        # 生成或使用现有 conversation_id
-        conversation_id = conversation_id or str(ObjectId())
-
-        # 检查对话是否已存在
-        existing_conversation = await mongodb_client.conversation_repository.get_conversation(
-            conversation_id
-        )
-        is_new_conversation = (existing_conversation is None)
-
         if is_new_conversation:
             # 创建 conversation 记录（类型为 agent）
-            await mongodb_client.conversation_repository.create_conversation(
+            created = await mongodb_client.conversation_repository.create_conversation(
                 conversation_id=conversation_id,
                 conversation_type="agent",
                 user_id=user_id,
@@ -130,6 +134,11 @@ class AgentRunService:
                 tags=[],
                 project_id=project_id
             )
+
+            if not created:
+                # 并发创建同一 ID 时重新校验，避免继续写入其他请求创建的会话。
+                await get_execution_conversation(conversation_id, user_id, "agent")
+                return conversation_id, False
 
             # 创建 agent_run 记录（Agent 专用）
             await mongodb_client.agent_run_repository.create_agent_run(
@@ -240,7 +249,6 @@ class AgentRunService:
         mcp_servers_list: Optional[List[str]],
         system_tools_list: Optional[List[str]],
         max_iterations: Optional[int],
-        title_queue: asyncio.Queue,
         is_new_conversation: bool
     ):
         """
@@ -258,53 +266,49 @@ class AgentRunService:
             mcp_servers_list: MCP 服务器列表
             system_tools_list: 系统工具列表
             max_iterations: 最大迭代次数
-            title_queue: 标题更新队列
             is_new_conversation: 是否为新会话
 
         Yields:
             str: SSE 格式的流式响应
         """
-        stream_done = False
+        # 标题任务随流消费创建，确保未开始消费的响应不会遗留后台任务。
+        await get_execution_conversation(conversation_id, user_id, "agent")
+        title_queue = asyncio.Queue()
+        title_task = None
+        title_sent = False
+        agent_stream = None
         try:
-            # 创建 agent 执行流的异步任务
-            async def agent_stream_wrapper():
-                nonlocal stream_done
-                async for chunk in agent_stream_executor.run_agent_stream(
-                    agent_name=agent_name,
-                    user_prompt=user_prompt,
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    images_info=images_info,
-                    model_name=model_name,
-                    system_prompt=system_prompt,
-                    mcp_servers=mcp_servers_list,
-                    system_tools=system_tools_list,
-                    max_iterations=max_iterations
-                ):
-                    yield chunk
-                stream_done = True
-
-            # 监听 agent 流和标题队列
-            agent_stream = agent_stream_wrapper()
-            async for chunk in agent_stream:
-                yield chunk
-
-                # 检查队列中是否有标题更新
-                try:
-                    while not title_queue.empty():
-                        title_event = await asyncio.wait_for(title_queue.get(), timeout=0.01)
-                        yield f"data: {json.dumps(title_event)}\n\n"
-                except asyncio.TimeoutError:
-                    pass
-
-            # agent 流结束后，等待并发送可能延迟的标题更新
             if is_new_conversation:
-                try:
-                    title_event = await asyncio.wait_for(title_queue.get(), timeout=3.0)
-                    yield f"data: {json.dumps(title_event)}\n\n"
-                except asyncio.TimeoutError:
-                    pass
+                title_queue, title_task = self.create_title_generator(user_id, user_prompt, conversation_id)
 
+            agent_stream = agent_stream_executor.run_agent_stream(
+                agent_name=agent_name,
+                user_prompt=user_prompt,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                images_info=images_info,
+                model_name=model_name,
+                system_prompt=system_prompt,
+                mcp_servers=mcp_servers_list,
+                system_tools=system_tools_list,
+                max_iterations=max_iterations
+            )
+            async for chunk in agent_stream:
+                # executor 保留直接消费时的 DONE 契约，组合响应由外层统一收尾。
+                if chunk.strip() != "data: [DONE]":
+                    yield chunk
+                if not title_sent and not title_queue.empty():
+                    title_sent = True
+                    yield f"data: {json.dumps(title_queue.get_nowait())}\n\n"
+
+            if title_task is not None and not title_sent:
+                # 等待不隐式取消子任务，超时与断开都交给同一处受保护的清理。
+                await asyncio.wait({title_task}, timeout=TITLE_WAIT_TIMEOUT)
+                if not title_queue.empty():
+                    yield f"data: {json.dumps(title_queue.get_nowait())}\n\n"
+
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Agent 流式响应生成出错: {str(e)}")
             error_chunk = {
@@ -314,7 +318,25 @@ class AgentRunService:
                 }
             }
             yield f"data: {json.dumps(error_chunk)}\n\n"
-            yield "data: [DONE]\n\n"
+        finally:
+            # ASGI 断开会反复取消 await；清理期间屏蔽外层取消并设置独立上限。
+            try:
+                if title_task is not None:
+                    with move_on_after(STREAM_CLEANUP_TIMEOUT, shield=True) as cleanup:
+                        if not title_task.done():
+                            title_task.cancel()
+                        await asyncio.gather(title_task, return_exceptions=True)
+                    if cleanup.cancel_called:
+                        logger.warning("Agent 标题任务清理超时")
+            finally:
+                if agent_stream is not None:
+                    with move_on_after(STREAM_CLEANUP_TIMEOUT, shield=True) as cleanup:
+                        await agent_stream.aclose()
+                    if cleanup.cancel_called:
+                        logger.warning("Agent 执行流清理超时")
+
+        # 清理先于终态，非流式 collector 在 DONE 处退出也不会遗留任务。
+        yield "data: [DONE]\n\n"
 
 
 # 全局实例

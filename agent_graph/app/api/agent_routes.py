@@ -1,6 +1,6 @@
 import json
 import logging
-import asyncio
+from contextlib import aclosing
 import tempfile
 import os
 from datetime import datetime
@@ -33,6 +33,15 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 
 # Agent 流式执行器实例
 agent_stream_executor = AgentStreamExecutor()
+
+
+class AgentStreamingResponse(StreamingResponse):
+    """在发送失败或客户端断开后显式关闭 Agent 流及其标题任务。"""
+
+    async def __call__(self, scope, receive, send):
+        async with aclosing(self.body_iterator):
+            await super().__call__(scope, receive, send)
+
 
 # ======= Agent 列表和查询 API接口 =======
 @router.get("/list", response_model=AgentListResponse)
@@ -422,21 +431,9 @@ async def agent_run(
             conversation_id=conversation_id
         )
 
-        # 4. 创建标题生成器（如果是新会话）
-        title_queue = None
-        if is_new_conversation:
-            title_queue, _ = agent_run_service.create_title_generator(
-                user_id=user_id,
-                user_prompt=user_prompt,
-                conversation_id=conversation_id
-            )
-        else:
-            # 创建空队列以保持接口一致
-            title_queue = asyncio.Queue()
-
-        # 5. 创建流式响应生成器
-        async def generate_stream():
-            async for chunk in agent_run_service.create_stream_generator(
+        # 4. 流式与非流式响应复用同一个拥有标题任务生命周期的生成器。
+        def generate_stream():
+            return agent_run_service.create_stream_generator(
                 agent_stream_executor=agent_stream_executor,
                 agent_name=agent_name,
                 user_prompt=user_prompt,
@@ -448,14 +445,12 @@ async def agent_run(
                 mcp_servers_list=mcp_servers_list,
                 system_tools_list=system_tools_list,
                 max_iterations=max_iterations,
-                title_queue=title_queue,
                 is_new_conversation=is_new_conversation
-            ):
-                yield chunk
+            )
 
-        # 6. 根据 stream 参数决定响应类型
+        # 5. 根据 stream 参数决定响应类型
         if stream:
-            return StreamingResponse(
+            return AgentStreamingResponse(
                 generate_stream(),
                 media_type="text/event-stream",
                 headers={

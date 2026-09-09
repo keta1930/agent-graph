@@ -16,6 +16,7 @@ version = "3.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
+    { name = "anyio" },
     { name = "apscheduler" },
     { name = "asyncer" },
     { name = "beautifulsoup4" },
@@ -59,6 +60,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp" },
+    { name = "anyio", specifier = "==4.9.0" },
     { name = "apscheduler", specifier = ">=3.11.0" },
     { name = "asyncer", specifier = ">=0.0.8" },
     { name = "beautifulsoup4", specifier = ">=4.13.4" },

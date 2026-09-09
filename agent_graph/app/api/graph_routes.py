@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse, JSONResponse, Response
 from agent_graph.app.services.model.model_service import model_service
 from agent_graph.app.services.graph.graph_service import graph_service
+from agent_graph.app.services.conversation.execution_guard import get_execution_conversation
 from agent_graph.app.templates.flow_diagram import FlowDiagram
 from agent_graph.app.utils.sse_helper import SSEHelper
 from agent_graph.app.models.graph_schema import (
@@ -283,6 +284,9 @@ async def generate_mcp_script(
 async def execute_graph(input_data: GraphInput, current_user: CurrentUser = Depends(get_current_user)):
     """执行图并返回流式结果或后台执行结果"""
     try:
+        if input_data.conversation_id:
+            await get_execution_conversation(input_data.conversation_id, current_user.user_id, "graph")
+
         # 检查图是否存在
         graph_doc = await graph_service.get_graph(input_data.graph_name, user_id=current_user.user_id)
         if not graph_doc:
@@ -301,9 +305,12 @@ async def execute_graph(input_data: GraphInput, current_user: CurrentUser = Depe
                     input_data.input_text,
                     graph_config,
                     input_data.conversation_id,
-                    user_id=current_user.user_id
+                    user_id=current_user.user_id,
+                    continue_from_checkpoint=input_data.continue_from_checkpoint
                 )
                 return JSONResponse(result)
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.error(f"启动后台执行时出错: {str(e)}")
                 raise HTTPException(
@@ -319,6 +326,8 @@ async def execute_graph(input_data: GraphInput, current_user: CurrentUser = Depe
                         async for sse_data in graph_service.continue_conversation_stream(
                                 input_data.conversation_id,
                                 input_data.input_text,
+                                continue_from_checkpoint=input_data.continue_from_checkpoint,
+                                user_id=current_user.user_id
                         ):
                             yield sse_data
                     else:

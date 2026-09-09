@@ -22,6 +22,10 @@ import {
 } from 'lucide-react';
 import { useGraphEditorStore } from '../../store/graphEditorStore';
 import { useT } from '../../i18n/hooks';
+import { isGraphOperationCancelled } from '../../utils/graphEditorUtils';
+import { getSessionGeneration, isCurrentSession } from '../../utils/authSession';
+import { getErrorMessage } from '../../utils/errors';
+import { useShallow } from 'zustand/react/shallow';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
@@ -68,10 +72,10 @@ const GraphVersionManager: React.FC<GraphVersionManagerProps> = ({
     loadVersion,
     deleteVersion,
     dirty
-  } = useGraphEditorStore();
+  } = useGraphEditorStore(useShallow(state => ({ versions: state.versions, loadingVersions: state.loadingVersions, fetchVersions: state.fetchVersions, createVersion: state.createVersion, loadVersion: state.loadVersion, deleteVersion: state.deleteVersion, dirty: state.dirty })));
 
   const [createVersionModalVisible, setCreateVersionModalVisible] = useState(false);
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<{ commit_message: string }>();
 
   // Set dayjs locale based on current language
   useEffect(() => {
@@ -82,9 +86,13 @@ const GraphVersionManager: React.FC<GraphVersionManagerProps> = ({
   // Load version list
   useEffect(() => {
     if (visible && graphName) {
+      let active = true;
+      const generation = getSessionGeneration();
       fetchVersions(graphName).catch((error) => {
-        messageApi.error(t('components.graphEditor.versionManager.versionListLoadFailed', { error: error.message }));
+        if (!active || !isCurrentSession(generation) || isGraphOperationCancelled(error)) return;
+        messageApi.error(t('components.graphEditor.versionManager.versionListLoadFailed', { error: getErrorMessage(error) }));
       });
+      return () => { active = false; };
     }
   }, [visible, graphName, fetchVersions, t, messageApi]);
 
@@ -96,12 +104,13 @@ const GraphVersionManager: React.FC<GraphVersionManagerProps> = ({
       messageApi.success(t('components.graphEditor.versionManager.versionCreated'));
       setCreateVersionModalVisible(false);
       form.resetFields();
-    } catch (error: any) {
-      if (error.errorFields) {
+    } catch (error) {
+      if (isGraphOperationCancelled(error)) return;
+      if (typeof error === 'object' && error !== null && 'errorFields' in error) {
         // Form validation error
         return;
       }
-      messageApi.error(t('components.graphEditor.versionManager.versionCreateFailed', { error: error.message || String(error) }));
+      messageApi.error(t('components.graphEditor.versionManager.versionCreateFailed', { error: getErrorMessage(error) }));
     }
   };
 
@@ -117,8 +126,9 @@ const GraphVersionManager: React.FC<GraphVersionManagerProps> = ({
             await loadVersion(graphName, versionId);
             messageApi.success(t('components.graphEditor.versionManager.versionLoaded', { message: commitMessage }));
             onClose();
-          } catch (error: any) {
-            messageApi.error(t('components.graphEditor.versionManager.versionLoadFailed', { error: error.message || String(error) }));
+          } catch (error) {
+      if (isGraphOperationCancelled(error)) return;
+            messageApi.error(t('components.graphEditor.versionManager.versionLoadFailed', { error: getErrorMessage(error) }));
           }
         },
         okButtonProps: {
@@ -134,8 +144,9 @@ const GraphVersionManager: React.FC<GraphVersionManagerProps> = ({
         await loadVersion(graphName, versionId);
         messageApi.success(t('components.graphEditor.versionManager.versionLoaded', { message: commitMessage }));
         onClose();
-      } catch (error: any) {
-        messageApi.error(t('components.graphEditor.versionManager.versionLoadFailed', { error: error.message || String(error) }));
+      } catch (error) {
+      if (isGraphOperationCancelled(error)) return;
+        messageApi.error(t('components.graphEditor.versionManager.versionLoadFailed', { error: getErrorMessage(error) }));
       }
     }
   };
@@ -145,8 +156,9 @@ const GraphVersionManager: React.FC<GraphVersionManagerProps> = ({
     try {
       await deleteVersion(graphName, versionId);
       messageApi.success(t('components.graphEditor.versionManager.versionDeleted'));
-    } catch (error: any) {
-      messageApi.error(t('components.graphEditor.versionManager.versionDeleteFailed', { error: error.message || String(error) }));
+    } catch (error) {
+      if (isGraphOperationCancelled(error)) return;
+      messageApi.error(t('components.graphEditor.versionManager.versionDeleteFailed', { error: getErrorMessage(error) }));
     }
   };
 

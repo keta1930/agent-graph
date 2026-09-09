@@ -1,5 +1,6 @@
+import { getErrorMessage } from '../utils/errors';
 // src/pages/AdminPanel.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Layout, message, App } from 'antd';
 import { isAdmin } from '../utils/auth';
@@ -38,30 +39,39 @@ const AdminPanel: React.FC = () => {
   const [inviteCurrentPage, setInviteCurrentPage] = useState(1);
   const [invitePageSize] = useState(10);
 
+  const request = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+
+  const loadData = useCallback(async () => {
+    const owner = ++request.current;
+    setLoading(true);
+    try {
+      if (viewMode === 'users') {
+        const userList = await listUsers();
+        if (owner !== request.current) return;
+        setUsers(userList);
+      } else {
+        const codeList = await listInviteCodes();
+        if (owner !== request.current) return;
+        setInviteCodes(codeList);
+      }
+    } catch (err) {
+      if (!mounted.current || owner !== request.current) return;
+      message.error(getErrorMessage(err, t('pages.adminPanel.loadDataFailed')));
+    } finally {
+      if (owner === request.current) setLoading(false);
+    }
+  }, [viewMode, t]);
+
   useEffect(() => {
     if (!isAdmin()) {
       navigate('/');
       return;
     }
     loadData();
-  }, [viewMode, navigate]);
-
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      if (viewMode === 'users') {
-        const userList = await listUsers();
-        setUsers(userList);
-      } else {
-        const codeList = await listInviteCodes();
-        setInviteCodes(codeList);
-      }
-    } catch (err: any) {
-      message.error(err.response?.data?.detail || t('pages.adminPanel.loadDataFailed'));
-    } finally {
-      setLoading(false);
-    }
-  };
+    return () => { request.current += 1; };
+  }, [loadData, navigate]);
 
   /**
    * 提升用户为管理员
@@ -83,10 +93,12 @@ const AdminPanel: React.FC = () => {
       onOk: async () => {
         try {
           await promoteUser(userId);
+          if (!mounted.current) return;
           message.success(t('pages.adminPanel.operationSuccess'));
           loadData();
-        } catch (err: any) {
-          message.error(err.response?.data?.detail || t('pages.adminPanel.operationFailed'));
+        } catch (err) {
+          if (!mounted.current) return;
+          message.error(getErrorMessage(err, t('pages.adminPanel.operationFailed')));
         }
       }
     });
@@ -118,10 +130,12 @@ const AdminPanel: React.FC = () => {
       onOk: async () => {
         try {
           await deactivateUser(userId);
+          if (!mounted.current) return;
           message.success(t('pages.adminPanel.operationSuccess'));
           loadData();
-        } catch (err: any) {
-          message.error(err.response?.data?.detail || t('pages.adminPanel.operationFailed'));
+        } catch (err) {
+          if (!mounted.current) return;
+          message.error(getErrorMessage(err, t('pages.adminPanel.operationFailed')));
         }
       }
     });
@@ -145,11 +159,13 @@ const AdminPanel: React.FC = () => {
         newCodeDescription || undefined,
         newCodeMaxUses || undefined
       );
+      if (!mounted.current) return;
       message.success(t('pages.adminPanel.inviteCodes.createSuccess', { code }));
       setDescriptionModalVisible(false);
       loadData();
-    } catch (err: any) {
-      message.error(err.response?.data?.detail || t('pages.adminPanel.inviteCodes.createFailed'));
+    } catch (err) {
+      if (!mounted.current) return;
+      message.error(getErrorMessage(err, t('pages.adminPanel.inviteCodes.createFailed')));
     }
   };
 
@@ -159,10 +175,12 @@ const AdminPanel: React.FC = () => {
   const handleToggleInviteCode = async (code: string, isActive: boolean) => {
     try {
       await toggleInviteCode(code, !isActive);
+      if (!mounted.current) return;
       message.success(t('pages.adminPanel.operationSuccess'));
       loadData();
-    } catch (err: any) {
-      message.error(err.response?.data?.detail || t('pages.adminPanel.operationFailed'));
+    } catch (err) {
+      if (!mounted.current) return;
+      message.error(getErrorMessage(err, t('pages.adminPanel.operationFailed')));
     }
   };
 

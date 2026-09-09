@@ -19,7 +19,9 @@
     "page": "页",
     "submit": "提交",
     "reset": "重置",
-    "deleteConfirm": "确定要删除此项吗？"
+    "deleteConfirm": "确定要删除此项吗？",
+    "reload": "刷新页面",
+    "backToWorkspace": "返回工作台"
   },
   "pages": {
     "login": {
@@ -167,7 +169,8 @@
         "selected": "已选择 {{count}} 个智能体",
         "success": "成功删除 {{count}} 个智能体",
         "partial": "删除了 {{success}} 个智能体，{{failed}} 个失败"
-      }
+      },
+      "uncategorized": "未分类"
     },
     "graphEditor": {
       "title": "工作流管理",
@@ -994,7 +997,8 @@
         "createSuccess": "分享链接创建成功",
         "shareFailed": "分享失败: {{error}}",
         "permissionDenied": "只有对话所有者可以创建分享链接"
-      }
+      },
+      "stopGeneration": "停止生成"
     },
     "sharedConversation": {
       "title": "分享的对话",
@@ -1477,7 +1481,8 @@
         "selectRegisteredPrompt": "或选择已注册的提示词",
         "selectRegisteredPromptPlaceholder": "选择提示词模板",
         "enabled": "启用",
-        "disabled": "禁用"
+        "disabled": "禁用",
+        "nodeNameConflict": "节点名称必须唯一且非空，不能使用 start、end 或 /、\\、.、{、}、:、|。"
       },
       "nodePropertiesPanel": {
         "basicInfo": "基础信息",
@@ -1551,7 +1556,8 @@
         "noInputNodes": "无输入节点",
         "noOutputNodes": "无输出节点",
         "deleteNode": "删除节点",
-        "deleteNodeConfirm": "删除节点"
+        "deleteNodeConfirm": "删除节点",
+        "nodeNameConflict": "节点名称必须唯一且非空，不能使用 start、end 或 /、\\、.、{、}、:、|。"
       },
       "versionManager": {
         "title": "版本管理",
@@ -1615,6 +1621,8 @@
     "unauthorized": "未授权访问",
     "notFound": "资源未找到",
     "serverError": "服务器错误，请稍后重试",
-    "unknown": "未知错误"
+    "unknown": "未知错误",
+    "pageLoadTitle": "页面加载失败",
+    "pageLoadDescription": "请刷新页面，或返回工作台继续操作。"
   }
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Layout, Row, Col, Alert, App } from 'antd';
 import { Grid3x3 } from 'lucide-react';
 import { useMCPStore } from '../store/mcpStore';
@@ -7,7 +7,7 @@ import MCPServerCard from '../components/mcp-manager/MCPServerCard';
 import MCPToolsViewer from '../components/mcp-manager/MCPToolsViewer';
 import MCPJsonEditor from '../components/mcp-manager/MCPJsonEditor';
 import MCPManagerHeader from '../components/mcp-manager/MCPManagerHeader';
-import { MCPServerConfig } from '../types/mcp';
+import { MCPServerConfig, MCPConfig } from '../types/mcp';
 import { getUserInfo } from '../utils/auth';
 import { useT } from '../i18n/hooks';
 import { MCP_COLORS, getMCPEmptyStateStyle } from '../constants/mcpManagerStyles';
@@ -17,25 +17,24 @@ const { Content } = Layout;
 const MCPManager: React.FC = () => {
   const t = useT();
   const { message } = App.useApp();
-  const {
-    config,
-    status,
-    loading,
-    error,
-    fetchConfig,
-    fetchStatus,
-    updateConfig,
-    addServer,
-    updateServer,
-    deleteServer,
-    connectServer,
-    disconnectServer,
-    connectAllServers
-  } = useMCPStore();
+  const config = useMCPStore(state => state.config);
+  const status = useMCPStore(state => state.status);
+  const loading = useMCPStore(state => state.loading);
+  const error = useMCPStore(state => state.error);
+  const fetchConfig = useMCPStore(state => state.fetchConfig);
+  const fetchStatus = useMCPStore(state => state.fetchStatus);
+  const updateConfig = useMCPStore(state => state.updateConfig);
+  const addServer = useMCPStore(state => state.addServer);
+  const updateServer = useMCPStore(state => state.updateServer);
+  const deleteServer = useMCPStore(state => state.deleteServer);
+  const connectServer = useMCPStore(state => state.connectServer);
+  const disconnectServer = useMCPStore(state => state.disconnectServer);
+  const connectAllServers = useMCPStore(state => state.connectAllServers);
 
   // 获取当前用户信息
   const currentUser = getUserInfo();
 
+  const formSession = useRef(0);
   const [modalVisible, setModalVisible] = useState(false);
   const [toolsModalVisible, setToolsModalVisible] = useState(false);
   const [selectedServer, setSelectedServer] = useState('');
@@ -46,9 +45,11 @@ const MCPManager: React.FC = () => {
   useEffect(() => {
     fetchConfig();
     fetchStatus();
+    return () => { formSession.current += 1; };
   }, [fetchConfig, fetchStatus]);
 
   const showAddModal = () => {
+    formSession.current += 1;
     setSelectedServer('');
     setInitialValues(undefined);
     setModalTitle(t('pages.mcpManager.addServerTitle'));
@@ -56,6 +57,7 @@ const MCPManager: React.FC = () => {
   };
 
   const showEditModal = (serverName: string) => {
+    formSession.current += 1;
     setSelectedServer(serverName);
     setInitialValues(config.mcpServers[serverName]);
     setModalTitle(t('pages.mcpManager.editServerTitle', { name: serverName }));
@@ -68,23 +70,26 @@ const MCPManager: React.FC = () => {
   };
 
   const handleFormSubmit = async (serverName: string, serverConfig: MCPServerConfig) => {
+    const owner = formSession.current;
     try {
       if (selectedServer) {
         // Edit existing server
         await updateServer(selectedServer, serverConfig);
+        if (owner !== formSession.current) return;
         message.success(t('pages.mcpManager.serverUpdateSuccess', { name: selectedServer }));
       } else {
         // Add new server
         if (config.mcpServers[serverName]) {
-          message.error(t('pages.mcpManager.serverExists', { name: serverName }));
-          return;
+          throw new Error(t('pages.mcpManager.serverExists', { name: serverName }));
         }
         await addServer(serverName, serverConfig);
+        if (owner !== formSession.current) return;
         message.success(t('pages.mcpManager.serverAddSuccess', { name: serverName }));
       }
       setModalVisible(false);
-    } catch (err: any) {
-      if (err.isVersionConflict) {
+    } catch (err) {
+      if (owner !== formSession.current) throw err;
+      if (err instanceof Error && 'isVersionConflict' in err && err.isVersionConflict) {
         message.error({
           content: t('pages.mcpManager.versionConflict', { message: err.message }),
           duration: 5
@@ -92,15 +97,18 @@ const MCPManager: React.FC = () => {
       } else {
         message.error(t('pages.mcpManager.operationFailed', { error: err instanceof Error ? err.message : String(err) }));
       }
+      throw err;
     }
   };
 
   const handleDeleteServer = async (serverName: string) => {
+    const owner = formSession.current;
     try {
       await deleteServer(serverName);
+      if (owner !== formSession.current) return;
       message.success(t('pages.mcpManager.serverDeleteSuccess', { name: serverName }));
-    } catch (err: any) {
-      if (err.isVersionConflict) {
+    } catch (err) {
+      if (err instanceof Error && 'isVersionConflict' in err && err.isVersionConflict) {
         message.error({
           content: t('pages.mcpManager.versionConflict', { message: err.message }),
           duration: 5
@@ -156,7 +164,7 @@ const MCPManager: React.FC = () => {
     message.info(t('pages.mcpManager.refreshing'));
   };
 
-  const handleSaveJson = async (newConfig: any) => {
+  const handleSaveJson = async (newConfig: MCPConfig) => {
     try {
       await updateConfig(newConfig);
       message.success(t('pages.mcpManager.configSaveSuccess'));
@@ -260,7 +268,7 @@ const MCPManager: React.FC = () => {
 
       <MCPServerForm
         visible={modalVisible}
-        onClose={() => setModalVisible(false)}
+        onClose={() => { formSession.current += 1; setModalVisible(false); }}
         onSubmit={handleFormSubmit}
         initialName={selectedServer}
         initialValues={initialValues}

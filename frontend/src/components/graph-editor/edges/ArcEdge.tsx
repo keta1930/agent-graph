@@ -1,7 +1,7 @@
 import React from 'react';
+import { useGraphEditorStore } from '../../../store/graphEditorStore';
 import {
   EdgeLabelRenderer,
-  useReactFlow,
   EdgeProps,
 } from 'reactflow';
 
@@ -12,19 +12,18 @@ import {
  * 弧线设计的目的是在视觉上区分正常的流程连接和循环/回退连接，避免边的重叠和混淆。
  * 橙色虚线样式进一步强化了这种区分。
  */
-const ArcEdge: React.FC<EdgeProps> = ({
-  id,
+const ArcEdge: React.FC<EdgeProps<{ handoffs?: number }>> = ({
+  source,
+  target,
   sourceX,
   sourceY,
   targetX,
   targetY,
-  sourcePosition,
-  targetPosition,
   style = {},
   markerEnd,
   data,
 }) => {
-  const { setEdges } = useReactFlow();
+  const removeConnection = useGraphEditorStore(state => state.removeConnection);
 
   const createArcPath = () => {
     const midX = (sourceX + targetX) / 2;
@@ -33,11 +32,7 @@ const ArcEdge: React.FC<EdgeProps> = ({
     return `M ${sourceX} ${sourceY} Q ${midX} ${midY} ${targetX} ${targetY}`;
   };
 
-  const onEdgeClick = () => {
-    setEdges((edges) => {
-      return edges.filter((edge) => edge.id !== id);
-    });
-  };
+  const onEdgeClick = () => removeConnection(source, target);
 
   const arcPath = createArcPath();
   const labelX = (sourceX + targetX) / 2;

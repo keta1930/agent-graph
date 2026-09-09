@@ -1,13 +1,12 @@
+import MarkdownCode from './MarkdownCode';
 // src/components/common/MarkdownRenderer.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { tomorrow } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 import { Card, Button, Tooltip, Space, Typography } from 'antd';
-import { CopyOutlined, EyeOutlined, FileTextOutlined, PartitionOutlined } from '@ant-design/icons';
+import { CopyOutlined, EyeOutlined, FileTextOutlined } from '@ant-design/icons';
 import 'katex/dist/katex.min.css';
 
 const { Text } = Typography;
@@ -83,27 +82,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex]}
           components={{
-            code({ node, inline, className, children, ...props }) {
-              const match = /language-(\w+)/.exec(className || '');
-              const language = match ? match[1] : '';
-              
-              
-              // 处理其他代码块
-              return !inline && match ? (
-                <SyntaxHighlighter
-                  style={tomorrow}
-                  language={language}
-                  PreTag="div"
-                  {...props}
-                >
-                  {String(children).replace(/\n$/, '')}
-                </SyntaxHighlighter>
-              ) : (
-                <code className={className} {...props}>
-                  {children}
-                </code>
-              );
-            },
+          pre: MarkdownCode,
             a({ href, children }) {
               return (
                 <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#1677ff' }}>

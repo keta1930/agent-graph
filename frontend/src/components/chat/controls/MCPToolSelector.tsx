@@ -68,7 +68,7 @@ const MCPToolSelector: React.FC<MCPToolSelectorProps> = ({
   };
 
   return (
-    <div style={{ position: 'relative' }} ref={dropdownRef}>
+    <div className={className} style={{ position: 'relative' }} ref={dropdownRef}>
       <Tooltip title={getTooltipTitle()}>
         <Button
           type="text"

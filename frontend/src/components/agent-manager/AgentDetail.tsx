@@ -1,10 +1,11 @@
+import type { Agent } from '../../services/agentService';
 import React from 'react';
 import { Descriptions, Tag } from 'antd';
 import { useT } from '../../i18n/hooks';
 import { TAG_STYLES } from '../../constants/agentManagerStyles';
 
 interface AgentDetailProps {
-  agent: any;
+  agent: Agent | null;
 }
 
 /**
@@ -81,9 +82,9 @@ const AgentDetail: React.FC<AgentDetailProps> = ({ agent }) => {
       </Descriptions.Item>
       
       <Descriptions.Item label={t('pages.agentManager.systemTools')}>
-        {agent.agent_config.system_tools?.length > 0 ? (
+        {(agent.agent_config.system_tools?.length ?? 0) > 0 ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-            {agent.agent_config.system_tools.map((tool: string) => (
+            {agent.agent_config.system_tools?.map((tool: string) => (
               <Tag key={tool} style={{ ...TAG_STYLES.secondary, margin: 0 }}>
                 {tool}
               </Tag>
@@ -93,9 +94,9 @@ const AgentDetail: React.FC<AgentDetailProps> = ({ agent }) => {
       </Descriptions.Item>
       
       <Descriptions.Item label={t('pages.agentManager.mcpServers')}>
-        {agent.agent_config.mcp?.length > 0 ? (
+        {(agent.agent_config.mcp?.length ?? 0) > 0 ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-            {agent.agent_config.mcp.map((server: string) => (
+            {agent.agent_config.mcp?.map((server: string) => (
               <Tag key={server} style={{ ...TAG_STYLES.secondary, margin: 0 }}>
                 {server}
               </Tag>
@@ -105,9 +106,9 @@ const AgentDetail: React.FC<AgentDetailProps> = ({ agent }) => {
       </Descriptions.Item>
       
       <Descriptions.Item label={t('pages.agentManager.tags')}>
-        {agent.agent_config.tags?.length > 0 ? (
+        {(agent.agent_config.tags?.length ?? 0) > 0 ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-            {agent.agent_config.tags.map((tag: string) => (
+            {agent.agent_config.tags?.map((tag: string) => (
               <Tag key={tag} style={{ ...TAG_STYLES.secondary, margin: 0 }}>
                 {tag}
               </Tag>

@@ -2,8 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { Spin, message } from 'antd';
 import { AgentListItem, AgentCategoryItem } from '../../../services/agentService';
-import { listAgents, listCategories } from '../../../services/agentService';
+import { listAllAgents, listCategories } from '../../../services/agentService';
 import AgentList from './AgentList';
+import { getSessionGeneration, isCurrentSession } from '../../../utils/authSession';
 
 /**
  * Agent 选择器组件属性
@@ -30,26 +31,30 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({
 
   // 加载 Agent 列表和分类
   useEffect(() => {
-    loadData();
+    const controller = new AbortController();
+    const session = getSessionGeneration();
+    const isCurrent = () => !controller.signal.aborted && isCurrentSession(session);
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const [agentsResponse, categoriesResponse] = await Promise.all([
+          listAllAgents(undefined, { signal: controller.signal }),
+          listCategories({ signal: controller.signal })
+        ]);
+        if (!isCurrent()) return;
+        setAgents(agentsResponse.agents);
+        setCategories(categoriesResponse.categories);
+      } catch (error) {
+        if (!isCurrent()) return;
+        console.error('加载 Agent 数据失败:', error);
+        message.error('加载 Agent 列表失败');
+      } finally {
+        if (isCurrent()) setLoading(false);
+      }
+    };
+    void loadData();
+    return () => controller.abort();
   }, []);
-
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const [agentsResponse, categoriesResponse] = await Promise.all([
-        listAgents(),
-        listCategories()
-      ]);
-      
-      setAgents(agentsResponse.agents || []);
-      setCategories(categoriesResponse.categories || []);
-    } catch (error) {
-      console.error('加载 Agent 数据失败:', error);
-      message.error('加载 Agent 列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <div style={{ 

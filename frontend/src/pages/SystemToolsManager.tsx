@@ -1,5 +1,6 @@
+import { getErrorMessage } from '../utils/errors';
 // src/pages/SystemToolsManager.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   Layout,
   message,
@@ -36,80 +37,54 @@ const SystemToolsManager: React.FC = () => {
   const { t } = useTranslation();
   
   const [categories, setCategories] = useState<ToolCategory[]>([]);
-  const [filteredCategories, setFilteredCategories] = useState<ToolCategory[]>([]);
+  const request = useRef(0);
+  const detailRequest = useRef(0);
   const [loading, setLoading] = useState(false);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedTool, setSelectedTool] = useState<SystemToolSchema | null>(null);
   const [searchText, setSearchText] = useState('');
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [readmeModalVisible, setReadmeModalVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
 
   /**
    * 加载系统工具列表
    */
-  const loadTools = async () => {
+  const loadTools = useCallback(async () => {
+    const owner = ++request.current;
     setLoading(true);
     try {
       const response = await listSystemTools();
+      if (owner !== request.current) return;
       setCategories(response.categories || []);
-      setFilteredCategories(response.categories || []);
-    } catch (error: any) {
-      message.error(t('pages.systemToolsManager.loadFailed', { error: error.message || t('errors.unknown') }));
+    } catch (error) {
+      message.error(t('pages.systemToolsManager.loadFailed', { error: getErrorMessage(error, t('errors.unknown')) }));
     } finally {
-      setLoading(false);
+      if (owner === request.current) setLoading(false);
     }
-  };
+  }, [t]);
 
   useEffect(() => {
-    loadTools();
-  }, []);
+    void loadTools();
+    return () => { request.current += 1; detailRequest.current += 1; };
+  }, [loadTools]);
 
-  /**
-   * 初始化所有分类为折叠状态
-   */
-  useEffect(() => {
-    if (categories.length > 0) {
-      setCollapsedCategories(new Set(categories.map(cat => cat.category)));
-    }
-  }, [categories]);
-
-  /**
-   * 搜索过滤
-   */
-  const handleSearch = (value: string) => {
-    setSearchText(value);
-    if (!value.trim()) {
-      setFilteredCategories(categories);
-      return;
-    }
-
-    const searchValue = value.toLowerCase();
-    const filtered = categories.map((category) => {
-      // 如果类别名称匹配，显示该类别下所有工具
-      if (category.category.toLowerCase().includes(searchValue)) {
-        return category;
-      }
-      // 否则按工具名称和描述过滤
-      const filteredTools = category.tools.filter((tool) =>
-        tool.name.toLowerCase().includes(searchValue) ||
-        tool.schema.function.description.toLowerCase().includes(searchValue)
-      );
-      return {
-        ...category,
-        tools: filteredTools,
-        tool_count: filteredTools.length
-      };
-    }).filter((category) => category.tools.length > 0);
-
-    setFilteredCategories(filtered);
-  };
+  const filteredCategories = useMemo(() => {
+    const keyword = searchText.trim().toLowerCase();
+    return categories.map(category => {
+      if (category.category.toLowerCase().includes(keyword)) return category;
+      const tools = category.tools.filter(tool => tool.name.toLowerCase().includes(keyword)
+        || tool.schema.function.description.toLowerCase().includes(keyword));
+      return { ...category, tools, tool_count: tools.length };
+    }).filter(category => category.tools.length > 0);
+  }, [categories, searchText]);
+  const handleSearch = (value: string) => setSearchText(value);
 
   /**
    * 切换分类折叠状态
    */
   const toggleCategoryCollapse = (category: string) => {
-    setCollapsedCategories(prev => {
+    setExpandedCategories(prev => {
       const newSet = new Set(prev);
       if (newSet.has(category)) {
         newSet.delete(category);
@@ -124,8 +99,10 @@ const SystemToolsManager: React.FC = () => {
    * 显示工具详情
    */
   const showToolDetail = async (toolName: string) => {
+    const owner = ++detailRequest.current;
     try {
       const response = await getSystemToolDetail(toolName);
+      if (owner !== detailRequest.current) return;
       if (response.success) {
         setSelectedTool({
           name: response.name,
@@ -133,8 +110,9 @@ const SystemToolsManager: React.FC = () => {
         });
         setDetailModalVisible(true);
       }
-    } catch (error: any) {
-      message.error(t('pages.systemToolsManager.loadDetailFailed', { error: error.message || t('errors.unknown') }));
+    } catch (error) {
+      if (owner !== detailRequest.current) return;
+      message.error(t('pages.systemToolsManager.loadDetailFailed', { error: getErrorMessage(error, t('errors.unknown')) }));
     }
   };
 
@@ -231,7 +209,7 @@ const SystemToolsManager: React.FC = () => {
               <CategorySection
                 key={category.category}
                 category={category}
-                isCollapsed={collapsedCategories.has(category.category)}
+                isCollapsed={!expandedCategories.has(category.category)}
                 onToggleCollapse={toggleCategoryCollapse}
                 onViewReadme={showCategoryReadme}
                 onViewToolDetail={showToolDetail}
@@ -252,7 +230,7 @@ const SystemToolsManager: React.FC = () => {
       <ToolDetailModal
         visible={detailModalVisible}
         tool={selectedTool}
-        onClose={() => setDetailModalVisible(false)}
+        onClose={() => { detailRequest.current += 1; setDetailModalVisible(false); }}
       />
 
       {/* 自定义滚动条样式 */}

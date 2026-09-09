@@ -1,5 +1,5 @@
 // src/components/memory-manager/MemoryDetailDrawer.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Drawer, Button, Spin, Empty, Modal, Input, Select, message } from 'antd';
 import { Plus } from 'lucide-react';
 import { MemoryDetail } from '../../types/memory';
@@ -23,6 +23,8 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
   onRefresh,
 }) => {
   const t = useT();
+  const latestT = useRef(t);
+  latestT.current = t;
   const [memoryData, setMemoryData] = useState<MemoryDetail | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [addModalVisible, setAddModalVisible] = useState<boolean>(false);
@@ -32,30 +34,33 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
     content: '',
   });
 
-  useEffect(() => {
-    if (visible && owner) {
-      fetchMemoryDetail();
-    }
-  }, [visible, owner]);
-
-  const fetchMemoryDetail = async () => {
-    if (!owner) return;
-
+  const scope = useRef(0);
+  const ownerType = owner?.type;
+  const ownerId = owner?.id;
+  const fetchMemoryDetail = useCallback(async (signal?: AbortSignal) => {
+    if (!visible || !ownerType || !ownerId) return;
+    const generation = scope.current;
     setLoading(true);
     try {
-      const response = await getOwnerMemories(owner.type, owner.id);
-      if (response.status === 'success') {
-        setMemoryData(response.data);
-      } else {
-        message.error(t('pages.memoryManager.loadFailed', { error: '' }));
-      }
-    } catch (error) {
-      console.error('Failed to load memory detail:', error);
-      message.error(t('pages.memoryManager.loadError'));
+      const response = await getOwnerMemories(ownerType, ownerId, { signal });
+      if (generation !== scope.current || signal?.aborted) return;
+      if (response.status === 'success') setMemoryData(response.data);
+      else message.error(latestT.current('pages.memoryManager.loadFailed', { error: '' }));
+    } catch {
+      if (generation === scope.current && !signal?.aborted) message.error(latestT.current('pages.memoryManager.loadError'));
     } finally {
-      setLoading(false);
+      if (generation === scope.current && !signal?.aborted) setLoading(false);
     }
-  };
+  }, [visible, ownerType, ownerId]);
+
+  useEffect(() => {
+    scope.current += 1;
+    const controller = new AbortController();
+    setMemoryData(null);
+    setAddModalVisible(false);
+    void fetchMemoryDetail(controller.signal);
+    return () => { scope.current += 1; controller.abort(); };
+  }, [fetchMemoryDetail]);
 
   const handleAddMemory = () => {
     setAddForm({ category: '', newCategory: '', content: '' });
@@ -64,6 +69,7 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
 
   const handleAddSubmit = async () => {
     if (!owner) return;
+    const generation = scope.current;
 
     const category = addForm.category === '__new__' ? addForm.newCategory : addForm.category;
     if (!category || !addForm.content) {
@@ -76,6 +82,7 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
         content: addForm.content,
       });
 
+      if (generation !== scope.current) return;
       if (response.status === 'success') {
         message.success(t('pages.memoryManager.addSuccess'));
         setAddModalVisible(false);
@@ -85,6 +92,7 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
         message.error(t('pages.memoryManager.addFailed', { error: response.message || '' }));
       }
     } catch (error) {
+      if (generation !== scope.current) return;
       console.error('Failed to add memory:', error);
       message.error(t('pages.memoryManager.addError'));
     }
@@ -92,12 +100,14 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
 
   const handleUpdateItem = async (category: string, itemId: string, content: string) => {
     if (!owner) return;
+    const generation = scope.current;
 
     try {
       const response = await updateMemoryItem(owner.type, owner.id, category, itemId, {
         content,
       });
 
+      if (generation !== scope.current) return;
       if (response.status === 'success') {
         message.success(t('pages.memoryManager.updateSuccess'));
         fetchMemoryDetail();
@@ -106,6 +116,7 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
         message.error(t('pages.memoryManager.updateFailed', { error: response.message || '' }));
       }
     } catch (error) {
+      if (generation !== scope.current) return;
       console.error('Failed to update memory:', error);
       message.error(t('pages.memoryManager.updateError'));
     }
@@ -113,10 +124,12 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
 
   const handleDeleteItems = async (category: string, itemIds: string[]) => {
     if (!owner) return;
+    const generation = scope.current;
 
     try {
       const response = await batchDeleteItems(owner.type, owner.id, category, itemIds);
 
+      if (generation !== scope.current) return;
       if (response.status === 'success') {
         message.success(t('pages.memoryManager.deleteSuccess'));
         fetchMemoryDetail();
@@ -132,6 +145,7 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
         message.error(t('pages.memoryManager.deleteFailed', { error: response.message || '' }));
       }
     } catch (error) {
+      if (generation !== scope.current) return;
       console.error('Failed to delete items:', error);
       message.error(t('pages.memoryManager.deleteError'));
     }
@@ -139,10 +153,12 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
 
   const handleDeleteCategory = async (category: string) => {
     if (!owner) return;
+    const generation = scope.current;
 
     try {
       const response = await batchDeleteCategories(owner.type, owner.id, [category]);
 
+      if (generation !== scope.current) return;
       if (response.status === 'success') {
         message.success(t('pages.memoryManager.deleteCategorySuccess'));
         fetchMemoryDetail();
@@ -151,6 +167,7 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({
         message.error(t('pages.memoryManager.deleteCategoryFailed', { error: response.message || '' }));
       }
     } catch (error) {
+      if (generation !== scope.current) return;
       console.error('Failed to delete category:', error);
       message.error(t('pages.memoryManager.deleteCategoryError'));
     }

@@ -1,5 +1,5 @@
 // src/pages/MemoryManager.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Row, Col, Input, Spin, Card, Typography, Space, Tag, message } from 'antd';
 import { Database, Search } from 'lucide-react';
 import { MemoryMetadata } from '../types/memory';
@@ -18,51 +18,36 @@ const MemoryManager: React.FC = () => {
   const [memories, setMemories] = useState<MemoryMetadata[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchText, setSearchText] = useState<string>('');
-  const [filteredMemories, setFilteredMemories] = useState<MemoryMetadata[]>([]);
+
   const [detailDrawerVisible, setDetailDrawerVisible] = useState<boolean>(false);
   const [currentOwner, setCurrentOwner] = useState<{ type: string; id: string } | null>(null);
   const [exportModalVisible, setExportModalVisible] = useState<boolean>(false);
   const [importModalVisible, setImportModalVisible] = useState<boolean>(false);
 
-  useEffect(() => {
-    fetchMemories();
-  }, []);
-
-  useEffect(() => {
-    handleSearch(searchText);
-  }, [searchText, memories]);
-
-  const fetchMemories = async () => {
+  const request = useRef(0);
+  const fetchMemories = useCallback(async (signal?: AbortSignal) => {
+    const owner = ++request.current;
     setLoading(true);
     try {
-      const response = await getMemories();
-      if (response.status === 'success') {
-        setMemories(response.data);
-      } else {
-        message.error(t('pages.memoryManager.loadFailed', { error: '' }));
-      }
-    } catch (error) {
-      console.error('Failed to load memories:', error);
-      message.error(t('pages.memoryManager.loadError'));
+      const response = await getMemories({ signal });
+      if (owner !== request.current || signal?.aborted) return;
+      if (response.status === 'success') setMemories(response.data);
+      else message.error(t('pages.memoryManager.loadFailed', { error: '' }));
+    } catch {
+      if (owner === request.current && !signal?.aborted) message.error(t('pages.memoryManager.loadError'));
     } finally {
-      setLoading(false);
+      if (owner === request.current && !signal?.aborted) setLoading(false);
     }
-  };
-
-  const handleSearch = (keyword: string) => {
-    if (!keyword.trim()) {
-      setFilteredMemories(memories);
-      return;
-    }
-
-    const lowerKeyword = keyword.toLowerCase();
-    const filtered = memories.filter(
-      (memory) =>
-        memory.owner_id.toLowerCase().includes(lowerKeyword) ||
-        memory.owner_type.toLowerCase().includes(lowerKeyword)
-    );
-    setFilteredMemories(filtered);
-  };
+  }, [t]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchMemories(controller.signal);
+    return () => { request.current += 1; controller.abort(); };
+  }, [fetchMemories]);
+  const filteredMemories = useMemo(() => {
+    const keyword = searchText.trim().toLowerCase();
+    return memories.filter(memory => memory.owner_id.toLowerCase().includes(keyword) || memory.owner_type.toLowerCase().includes(keyword));
+  }, [memories, searchText]);
 
   const handleEditClick = (owner: { type: string; id: string }) => {
     setCurrentOwner(owner);

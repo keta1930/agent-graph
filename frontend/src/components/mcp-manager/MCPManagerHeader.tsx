@@ -1,3 +1,4 @@
+import type { I18nContextValue } from '../../i18n/types';
 import React from 'react';
 import { Layout, Typography, Space, Tag, Button, Tooltip } from 'antd';
 import { Server, Code, Grid3x3, Plus, RefreshCw, Play } from 'lucide-react';
@@ -17,7 +18,7 @@ interface MCPManagerHeaderProps {
   onConnectAll: () => void;
   loading: boolean;
   disabled: boolean;
-  t: (key: string, params?: any) => string;
+  t: I18nContextValue['t'];
 }
 
 /**

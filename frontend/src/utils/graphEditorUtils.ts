@@ -27,3 +27,7 @@ export const getFileExtension = (filename: string): string => {
 export const validateGraphName = (name: string): boolean => {
   return !/[/\\.]/.test(name);
 };
+
+/** 编辑会话失效时安静消费请求取消。 */
+export const isGraphOperationCancelled = (error: unknown): boolean =>
+  error instanceof Error && (error.name === 'AbortError' || error.name === 'CanceledError');

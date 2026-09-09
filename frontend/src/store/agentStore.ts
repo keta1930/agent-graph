@@ -1,5 +1,8 @@
 // src/store/agentStore.ts
 import { create } from 'zustand';
+import { createRequestScope } from '../services/requestLifecycle';
+import { registerSessionReset } from '../utils/authSession';
+import { getErrorMessage } from '../utils/errors';
 import * as agentService from '../services/agentService';
 import { AgentListItem } from '../services/agentService';
 
@@ -11,21 +14,21 @@ interface AgentState {
   fetchAgents: () => Promise<void>;
 }
 
+const request = createRequestScope();
+
 export const useAgentStore = create<AgentState>((set) => ({
   agents: [],
   loading: false,
   error: undefined,
 
-  fetchAgents: async () => {
+  fetchAgents: () => request.run('all', async context => {
+    set({ loading: true, error: undefined });
     try {
-      set({ loading: true, error: undefined });
-      const response = await agentService.listAgents();
-      set({ agents: response.agents || [], loading: false });
+      const response = await agentService.listAllAgents(undefined, { signal: context.signal });
+      if (context.isCurrent()) set({ agents: response.agents });
     } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch agents'
-      });
-    }
-  },
+      if (context.isCurrent()) set({ error: getErrorMessage(error) });
+    } finally { if (context.isCurrent()) set({ loading: false }); }
+  }),
 }));
+registerSessionReset(() => { request.invalidate(); useAgentStore.setState({ agents: [], loading: false, error: undefined }); });

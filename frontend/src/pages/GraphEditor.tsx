@@ -1,5 +1,5 @@
 // 图编辑器主组件
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Alert, App, message } from 'antd';
 import AddNodeModal from '../components/graph-editor/AddNodeModal';
 import GraphVersionManager from '../components/graph-editor/GraphVersionManager';
@@ -13,8 +13,11 @@ import { useGraphEditorStore } from '../store/graphEditorStore';
 import { useMCPStore } from '../store/mcpStore';
 import { useModelStore } from '../store/modelStore';
 import { useT } from '../i18n/hooks';
-import { ViewMode } from '../utils/graphEditorConstants';
-import { generateNodePosition } from '../utils/graphEditorUtils';
+import { getErrorMessage } from '../utils/errors';
+import { useShallow } from 'zustand/react/shallow';
+import type { AgentNode } from '../types/graph';
+import { getSessionGeneration, isCurrentSession } from '../utils/authSession';
+import { generateNodePosition, isGraphOperationCancelled } from '../utils/graphEditorUtils';
 
 /**
  * 图编辑器页面
@@ -24,6 +27,8 @@ const GraphEditor: React.FC = () => {
   const { modal } = App.useApp();
   const {
     fetchGraphs,
+    closeGraph,
+    editorSession,
     addNode,
     loading,
     error,
@@ -43,18 +48,27 @@ const GraphEditor: React.FC = () => {
     autoLayout,
     importGraphFromFile,
     importGraphPackageFromFile
-  } = useGraphEditorStore();
+  } = useGraphEditorStore(useShallow(state => ({
+    fetchGraphs: state.fetchGraphs, closeGraph: state.closeGraph, editorSession: state.editorSession,
+    addNode: state.addNode, loading: state.loading, error: state.error, currentGraph: state.currentGraph,
+    selectedNode: state.selectedNode, selectNode: state.selectNode, createNewGraph: state.createNewGraph,
+    deleteGraph: state.deleteGraph, graphs: state.graphs, loadGraph: state.loadGraph, saveGraph: state.saveGraph,
+    dirty: state.dirty, exportGraph: state.exportGraph, generateMCPScript: state.generateMCPScript,
+    getGraphReadme: state.getGraphReadme, updateGraphProperties: state.updateGraphProperties,
+    autoLayout: state.autoLayout, importGraphFromFile: state.importGraphFromFile, importGraphPackageFromFile: state.importGraphPackageFromFile
+  })));
 
-  const { fetchConfig, fetchStatus } = useMCPStore();
-  const { fetchModels } = useModelStore();
+  const fetchConfig = useMCPStore(state => state.fetchConfig);
+  const fetchStatus = useMCPStore(state => state.fetchStatus);
+  const fetchModels = useModelStore(state => state.fetchModels);
 
   // 状态管理
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const viewMode = currentGraph ? 'editor' : 'list';
   const [addNodeModalVisible, setAddNodeModalVisible] = useState(false);
   const [newGraphModalVisible, setNewGraphModalVisible] = useState(false);
   const [versionManagerVisible, setVersionManagerVisible] = useState(false);
   const [searchText, setSearchText] = useState('');
-  const [filteredGraphs, setFilteredGraphs] = useState<string[]>(graphs);
+  const filteredGraphs = useMemo(() => graphs.filter(name => name.toLowerCase().includes(searchText.trim().toLowerCase())), [graphs, searchText]);
 
   const [readmeModalVisible, setReadmeModalVisible] = useState(false);
   const [readmeContent, setReadmeContent] = useState('');
@@ -86,42 +100,20 @@ const GraphEditor: React.FC = () => {
     };
   }, [fetchGraphs, fetchConfig, fetchStatus, fetchModels]);
 
-  // 搜索过滤
-  useEffect(() => {
-    if (!searchText.trim()) {
-      setFilteredGraphs(graphs);
-    } else {
-      const keyword = searchText.toLowerCase();
-      const filtered = graphs.filter(graphName =>
-        graphName.toLowerCase().includes(keyword)
-      );
-      setFilteredGraphs(filtered);
-    }
-  }, [searchText, graphs]);
-
-  // 自动切换视图模式
-  useEffect(() => {
-    if (currentGraph) {
-      setViewMode('editor');
-    } else {
-      setViewMode('list');
-    }
-  }, [currentGraph]);
-
   // 创建新图
   const handleCreateNewGraph = async (values: { name: string; description?: string }) => {
     try {
       createNewGraph(values.name, values.description || '');
       message.success(t('pages.graphEditor.createSuccess', { name: values.name }));
-    } catch (error: any) {
-      message.error(t('pages.graphEditor.createFailed', { error: error.message || t('errors.serverError') }));
+    } catch (error) {
+      message.error(t('pages.graphEditor.createFailed', { error: getErrorMessage(error, t('errors.serverError')) }));
       throw error;
     }
   };
 
   // 进入编辑模式
   const handleEditGraph = (graphName: string) => {
-    loadGraph(graphName);
+    void loadGraph(graphName).catch(() => {});
   };
 
   // 返回列表
@@ -133,48 +125,55 @@ const GraphEditor: React.FC = () => {
         okText: t('pages.graphEditor.saveAndReturn'),
         cancelText: t('pages.graphEditor.returnDirectly'),
         onOk: async () => {
-          await saveGraph();
-          selectNode(null);
-          setViewMode('list');
+          await handleSave();
+          if (useGraphEditorStore.getState().dirty) throw new Error(t('pages.graphEditor.saveChangesMessage'));
+          closeGraph();
         },
         onCancel: () => {
-          selectNode(null);
-          setViewMode('list');
+          closeGraph();
         }
       });
     } else {
-      selectNode(null);
-      setViewMode('list');
+      closeGraph();
     }
   };
 
   // 删除图
   const handleDeleteGraph = async (graphName: string) => {
+    const generation = getSessionGeneration();
     try {
       await deleteGraph(graphName);
+      if (!isCurrentSession(generation)) return;
       message.success(t('pages.graphEditor.deleteSuccess', { name: graphName }));
-    } catch (error: any) {
-      message.error(t('pages.graphEditor.deleteFailed', { error: error.message || t('errors.serverError') }));
+    } catch (error) {
+      if (!isCurrentSession(generation) || isGraphOperationCancelled(error)) return;
+      message.error(t('pages.graphEditor.deleteFailed', { error: getErrorMessage(error, t('errors.serverError')) }));
     }
   };
 
   // 导出为压缩包
   const handleExportPackage = async (graphName: string) => {
+    const generation = getSessionGeneration();
     try {
       await exportGraph(graphName);
+      if (!isCurrentSession(generation)) return;
       message.success(t('pages.graphEditor.exportSuccess', { name: graphName }));
-    } catch (error: any) {
-      message.error(t('pages.graphEditor.exportFailed', { error: error.message || t('errors.serverError') }));
+    } catch (error) {
+      if (!isCurrentSession(generation) || isGraphOperationCancelled(error)) return;
+      message.error(t('pages.graphEditor.exportFailed', { error: getErrorMessage(error, t('errors.serverError')) }));
     }
   };
 
   // 导出为 MCP Script
   const handleExportMCP = async (graphName: string) => {
+    const generation = getSessionGeneration();
     try {
       await generateMCPScript(graphName);
+      if (!isCurrentSession(generation)) return;
       message.success(t('pages.graphEditor.exportMCPSuccess'));
-    } catch (error: any) {
-      message.error(t('pages.graphEditor.exportFailed', { error: error.message || t('errors.serverError') }));
+    } catch (error) {
+      if (!isCurrentSession(generation) || isGraphOperationCancelled(error)) return;
+      message.error(t('pages.graphEditor.exportFailed', { error: getErrorMessage(error, t('errors.serverError')) }));
     }
   };
 
@@ -183,30 +182,34 @@ const GraphEditor: React.FC = () => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    const generation = getSessionGeneration();
     try {
       const fileName = file.name.toLowerCase();
       let result;
 
       if (fileName.endsWith('.json')) {
         result = await importGraphFromFile(file);
-        message.success(t('pages.graphEditor.importSuccess', { name: result.graph_name || file.name }));
+        if (!isCurrentSession(generation)) return;
+      message.success(t('pages.graphEditor.importSuccess', { name: result.graph_name || file.name }));
       } else if (fileName.endsWith('.zip')) {
         result = await importGraphPackageFromFile(file);
-        message.success(t('pages.graphEditor.importPackageSuccess', { name: result.graph_name || file.name }));
+        if (!isCurrentSession(generation)) return;
+      message.success(t('pages.graphEditor.importPackageSuccess', { name: result.graph_name || file.name }));
       } else {
         message.error(t('pages.graphEditor.unsupportedFileType'));
         return;
       }
 
       event.target.value = '';
-    } catch (error: any) {
-      message.error(t('pages.graphEditor.importFailed', { error: error.message || t('errors.serverError') }));
+    } catch (error) {
+      if (!isCurrentSession(generation) || isGraphOperationCancelled(error)) return;
+      message.error(t('pages.graphEditor.importFailed', { error: getErrorMessage(error, t('errors.serverError')) }));
       event.target.value = '';
     }
   };
 
   // 添加节点
-  const handleAddNode = (nodeData: any) => {
+  const handleAddNode = (nodeData: Partial<AgentNode>) => {
     const position = generateNodePosition();
     addNode({ ...nodeData, position });
     setAddNodeModalVisible(false);
@@ -214,23 +217,31 @@ const GraphEditor: React.FC = () => {
 
   // 保存当前图
   const handleSave = async () => {
+    const generation = getSessionGeneration();
     try {
       await saveGraph();
+      if (!isCurrentSession(generation)) throw new DOMException('Session changed', 'AbortError');
       message.success(t('pages.graphEditor.saveSuccess'));
-    } catch (error: any) {
-      message.error(t('pages.graphEditor.saveFailed', { error: error.message || t('errors.serverError') }));
+    } catch (error) {
+      if (!isCurrentSession(generation) || isGraphOperationCancelled(error)) throw error;
+      message.error(t('pages.graphEditor.saveFailed', { error: getErrorMessage(error, t('errors.serverError')) }));
+      throw error;
     }
   };
 
   // 查看 README
   const handleViewReadme = async () => {
     if (!currentGraph) return;
+    const generation = getSessionGeneration();
     try {
       const result = await getGraphReadme(currentGraph.name);
+      if (!isCurrentSession(generation)) return;
+      if (useGraphEditorStore.getState().editorSession !== editorSession) return;
       setReadmeContent(result.readme);
       setReadmeModalVisible(true);
-    } catch (error: any) {
-      message.error(t('pages.graphEditor.readmeFailed', { error: error.message || t('errors.serverError') }));
+    } catch (error) {
+      if (!isCurrentSession(generation) || isGraphOperationCancelled(error)) return;
+      message.error(t('pages.graphEditor.readmeFailed', { error: getErrorMessage(error, t('errors.serverError')) }));
     }
   };
 
@@ -245,8 +256,8 @@ const GraphEditor: React.FC = () => {
     try {
       updateGraphProperties(values);
       message.success(t('pages.graphEditor.graphSettingsUpdated'));
-    } catch (error: any) {
-      message.error(t('pages.graphEditor.graphSettingsUpdateFailed', { error: error.message || t('errors.serverError') }));
+    } catch (error) {
+      message.error(t('pages.graphEditor.graphSettingsUpdateFailed', { error: getErrorMessage(error, t('errors.serverError')) }));
       throw error;
     }
   };
@@ -281,6 +292,7 @@ const GraphEditor: React.FC = () => {
         />
       ) : (
         <GraphEditorView
+          key={editorSession}
           graphName={currentGraph?.name || ''}
           graphDescription={currentGraph?.description}
           hasUnsavedChanges={hasUnsavedChanges}
@@ -290,7 +302,10 @@ const GraphEditor: React.FC = () => {
           onViewReadme={handleViewReadme}
           onAutoLayout={handleAutoLayout}
           onAddNode={() => setAddNodeModalVisible(true)}
-          onGraphSettings={() => setGraphSettingsModalVisible(true)}
+          onGraphSettings={() => {
+            try { useGraphEditorStore.getState().applyJsonDraft(); setGraphSettingsModalVisible(true); }
+            catch (error) { message.error(getErrorMessage(error)); }
+          }}
           onVersionManager={() => setVersionManagerVisible(true)}
           onCloseNodePanel={() => selectNode(null)}
         />

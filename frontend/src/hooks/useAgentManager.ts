@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { getErrorMessage } from '../utils/errors';
+import { getSessionGeneration, isCurrentSession } from '../utils/authSession';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { App } from 'antd';
 import {
-  listAgents,
+  listAllAgents,
   createAgent,
   updateAgent,
   deleteAgent,
@@ -42,8 +44,10 @@ export const useAgentManager = () => {
   const [categories, setCategories] = useState<AgentCategoryItem[]>([]);
 
   // 分组数据
-  const [groupedAgents, setGroupedAgents] = useState<CategoryGroup[]>([]);
-  const [filteredGroups, setFilteredGroups] = useState<CategoryGroup[]>([]);
+  const request = useRef(0);
+  const listController = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current += 1; listController.current?.abort(); }; }, []);
 
   /**
    * 按分类分组 Agents
@@ -52,7 +56,7 @@ export const useAgentManager = () => {
     const groupMap = new Map<string, CategoryGroup>();
 
     agentList.forEach(agent => {
-      const category = agent.category || t('pages.agentManager.noAgents');
+      const category = agent.category || '';
       if (!groupMap.has(category)) {
         groupMap.set(category, {
           category,
@@ -63,22 +67,29 @@ export const useAgentManager = () => {
     });
 
     return Array.from(groupMap.values()).sort((a, b) => a.category.localeCompare(b.category));
-  }, [t]);
+  }, []);
 
   /**
    * 加载 Agents 列表
    */
   const loadAgents = useCallback(async () => {
+    const owner = ++request.current;
+    listController.current?.abort();
+    const controller = new AbortController();
+    listController.current = controller;
+    const session = getSessionGeneration();
+    const isCurrent = () => mounted.current && owner === request.current && isCurrentSession(session) && !controller.signal.aborted;
     setLoading(true);
     try {
-      const response = await listAgents();
+      const response = await listAllAgents(undefined, { signal: controller.signal });
+      if (!isCurrent()) return;
       setAgents(response.agents || []);
-    } catch (error: any) {
-      const errorDetail = error.response?.data?.detail || error.message || t('errors.serverError');
-      console.error('Load agents error:', error.response?.data);
+    } catch (error) {
+      if (!isCurrent()) return;
+      const errorDetail = getErrorMessage(error, t('errors.serverError'));
       message.error(t('pages.agentManager.loadFailed', { error: errorDetail }));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [t, message]);
 
@@ -94,13 +105,14 @@ export const useAgentManager = () => {
         listCategories()
       ]);
 
-      setModels(modelResponse.map((m: any) => m.name));
-      const allTools = toolsResponse.categories.flatMap((cat: any) => cat.tools.map((t: any) => t.name));
+      if (!mounted.current) return;
+      setModels(modelResponse.map(m => m.name));
+      const allTools = toolsResponse.categories.flatMap(cat => cat.tools.map(tool => tool.name));
       setSystemTools(allTools);
       setSystemToolCategories(toolsResponse.categories || []);
       setMcpServers(Object.keys(mcpResponse.mcpServers || {}));
       setCategories(categoriesResponse.categories || []);
-    } catch (error: any) {
+    } catch (error) {
       console.error('加载选项失败:', error);
     }
   }, []);
@@ -111,12 +123,13 @@ export const useAgentManager = () => {
   const handleCreateAgent = useCallback(async (agentConfig: AgentConfig) => {
     try {
       await createAgent(agentConfig);
+      if (!mounted.current) return false;
       message.success(t('pages.agentManager.createSuccess', { name: agentConfig.name }));
       await loadAgents();
       return true;
-    } catch (error: any) {
-      const errorDetail = error.response?.data?.detail || error.message || t('errors.serverError');
-      console.error('Agent operation error:', error.response?.data);
+    } catch (error) {
+      if (!mounted.current) return false;
+      const errorDetail = getErrorMessage(error, t('errors.serverError'));
       message.error(t('pages.agentManager.operationFailed', { error: errorDetail }));
       return false;
     }
@@ -128,12 +141,12 @@ export const useAgentManager = () => {
   const handleUpdateAgent = useCallback(async (agentName: string, agentConfig: AgentConfig) => {
     try {
       await updateAgent(agentName, agentConfig);
+      if (!mounted.current) return false;
       message.success(t('pages.agentManager.updateSuccess', { name: agentName }));
       await loadAgents();
       return true;
-    } catch (error: any) {
-      const errorDetail = error.response?.data?.detail || error.message || t('errors.serverError');
-      console.error('Agent operation error:', error.response?.data);
+    } catch (error) {
+      const errorDetail = getErrorMessage(error, t('errors.serverError'));
       message.error(t('pages.agentManager.operationFailed', { error: errorDetail }));
       return false;
     }
@@ -145,12 +158,12 @@ export const useAgentManager = () => {
   const handleDeleteAgent = useCallback(async (agentName: string) => {
     try {
       await deleteAgent(agentName);
+      if (!mounted.current) return false;
       message.success(t('pages.agentManager.deleteSuccess', { name: agentName }));
       await loadAgents();
       return true;
-    } catch (error: any) {
-      const errorDetail = error.response?.data?.detail || error.message || t('errors.serverError');
-      console.error('Agent delete error:', error.response?.data);
+    } catch (error) {
+      const errorDetail = getErrorMessage(error, t('errors.serverError'));
       message.error(t('pages.agentManager.deleteFailed', { error: errorDetail }));
       return false;
     }
@@ -162,10 +175,10 @@ export const useAgentManager = () => {
   const fetchAgentDetail = useCallback(async (agentName: string) => {
     try {
       const response = await getAgent(agentName);
+      if (!mounted.current) return null;
       return response.agent;
-    } catch (error: any) {
-      const errorDetail = error.response?.data?.detail || error.message || t('errors.serverError');
-      console.error('Load agent detail error:', error.response?.data);
+    } catch (error) {
+      const errorDetail = getErrorMessage(error, t('errors.serverError'));
       message.error(t('pages.agentManager.loadDetailFailed', { error: errorDetail }));
       return null;
     }
@@ -177,32 +190,31 @@ export const useAgentManager = () => {
     loadOptions();
   }, [loadAgents, loadOptions]);
 
-  // 分组 Agents
-  useEffect(() => {
-    const grouped = groupAgentsByCategory(agents);
-    setGroupedAgents(grouped);
-    setFilteredGroups(grouped);
-  }, [agents, groupAgentsByCategory]);
+  const groupedAgents = useMemo(() => groupAgentsByCategory(agents), [agents, groupAgentsByCategory]);
+  const filteredGroups = useMemo(() => {
+    const keyword = searchText.trim().toLowerCase();
+    return groupedAgents.map(group => ({
+      ...group,
+      agents: group.agents.filter(agent => agent.name.toLowerCase().includes(keyword)
+        || agent.category.toLowerCase().includes(keyword)
+        || agent.tags?.some(tag => tag.toLowerCase().includes(keyword))),
+    })).filter(group => group.agents.length > 0);
+  }, [groupedAgents, searchText]);
 
-  // 搜索过滤
-  useEffect(() => {
-    if (!searchText.trim()) {
-      setFilteredGroups(groupedAgents);
-    } else {
-      const keyword = searchText.toLowerCase();
-      const filtered = groupedAgents
-        .map(group => ({
-          ...group,
-          agents: group.agents.filter(agent =>
-            agent.name.toLowerCase().includes(keyword) ||
-            agent.category.toLowerCase().includes(keyword) ||
-            agent.tags?.some(tag => tag.toLowerCase().includes(keyword))
-          )
-        }))
-        .filter(group => group.agents.length > 0);
-      setFilteredGroups(filtered);
+  const handleBatchDelete = useCallback(async (names: string[]) => {
+    const succeededIds: string[] = [];
+    const failed: { id: string; message: string }[] = [];
+    for (const name of names) {
+      if (!mounted.current) break;
+      try { await deleteAgent(name); succeededIds.push(name); }
+      catch (error) { failed.push({ id: name, message: getErrorMessage(error) }); }
     }
-  }, [searchText, groupedAgents]);
+    if (mounted.current && succeededIds.length) {
+      setAgents(current => current.filter(agent => !succeededIds.includes(agent.name)));
+      await loadAgents();
+    }
+    return { succeededIds, failed };
+  }, [loadAgents]);
 
   return {
     // 状态
@@ -224,6 +236,7 @@ export const useAgentManager = () => {
     handleCreateAgent,
     handleUpdateAgent,
     handleDeleteAgent,
+    handleBatchDelete,
     fetchAgentDetail,
   };
 };

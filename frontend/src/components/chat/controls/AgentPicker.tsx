@@ -2,8 +2,9 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Button, Tooltip, Typography, message, Tag } from 'antd';
 import { Bot, CheckCircle } from 'lucide-react';
-import { listAgents, AgentListItem } from '../../../services/agentService';
+import { listAllAgents, AgentListItem } from '../../../services/agentService';
 import { useT } from '../../../i18n/hooks';
+import { getSessionGeneration, isCurrentSession } from '../../../utils/authSession';
 
 const { Text } = Typography;
 
@@ -35,6 +36,7 @@ const AgentPicker: React.FC<AgentPickerProps> = ({
   const [showPanel, setShowPanel] = useState(false);
   const [agents, setAgents] = useState<AgentListItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,24 +52,32 @@ const AgentPicker: React.FC<AgentPickerProps> = ({
     }
   }, [showPanel]);
 
-  const loadAgents = async () => {
-    setLoading(true);
-    try {
-      const response = await listAgents();
-      setAgents(response.agents || []);
-    } catch (error) {
-      console.error(t('components.agentPicker.loadAgentsFailed'), error);
-      message.error(t('components.agentPicker.loadAgentsFailed'));
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (!showPanel || loaded) { setLoading(false); return; }
+    const controller = new AbortController();
+    const session = getSessionGeneration();
+    const isCurrent = () => !controller.signal.aborted && isCurrentSession(session);
+    const loadAgents = async () => {
+      setLoading(true);
+      try {
+        const response = await listAllAgents(undefined, { signal: controller.signal });
+        if (!isCurrent()) return;
+        setAgents(response.agents);
+        setLoaded(true);
+      } catch (error) {
+        if (!isCurrent()) return;
+        console.error(t('components.agentPicker.loadAgentsFailed'), error);
+        message.error(t('components.agentPicker.loadAgentsFailed'));
+      } finally {
+        if (isCurrent()) setLoading(false);
+      }
+    };
+    void loadAgents();
+    return () => controller.abort();
+  }, [showPanel, loaded, t]);
 
   const handleButtonClick = () => {
-    if (!showPanel && agents.length === 0) {
-      loadAgents();
-    }
-    setShowPanel(!showPanel);
+    setShowPanel(current => !current);
   };
 
   const handleSelectAgent = (agentName: string) => {

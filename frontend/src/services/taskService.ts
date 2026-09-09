@@ -18,32 +18,32 @@ export class TaskService {
   }
 
   // 获取任务摘要列表
-  async getTaskSummaries(params?: TaskQueryParams): Promise<TaskSummary[]> {
-    const response = await api.get('/tasks', { params });
+  async getTaskSummaries(params?: TaskQueryParams, options: { signal?: AbortSignal } = {}): Promise<TaskSummary[]> {
+    const response = await api.get<TaskSummary[]>('/tasks', { params, ...options });
     return response.data;
   }
 
   // 获取单个任务详情
-  async getTask(taskId: string): Promise<Task> {
-    const response = await api.get(`/tasks/${taskId}`);
+  async getTask(taskId: string, options: { signal?: AbortSignal } = {}): Promise<Task> {
+    const response = await api.get<Task>(`/tasks/${encodeURIComponent(taskId)}`, options);
     return response.data;
   }
 
   // 更新任务状态
   async updateTaskStatus(taskId: string, statusUpdate: TaskStatusUpdate): Promise<TaskResponse> {
-    const response = await api.put(`/tasks/${taskId}/status`, statusUpdate);
+    const response = await api.put(`/tasks/${encodeURIComponent(taskId)}/status`, statusUpdate);
     return response.data;
   }
 
   // 删除任务
   async deleteTask(taskId: string): Promise<TaskResponse> {
-    const response = await api.delete(`/tasks/${taskId}`);
+    const response = await api.delete(`/tasks/${encodeURIComponent(taskId)}`);
     return response.data;
   }
 
   // 获取调度器中的任务
-  async getScheduledJobs(): Promise<ScheduledJob[]> {
-    const response = await api.get('/tasks/scheduler/jobs');
+  async getScheduledJobs(options: { signal?: AbortSignal } = {}): Promise<ScheduledJob[]> {
+    const response = await api.get<ScheduledJob[]>('/tasks/scheduler/jobs', options);
     return response.data;
   }
 

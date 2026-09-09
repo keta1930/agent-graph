@@ -1,5 +1,6 @@
+import type { JsonObject } from '../../types/json';
 // src/components/model-manager/ModelForm.tsx
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Form, Input, Modal, Button, InputNumber, Switch, Select } from 'antd';
 import { ChevronDown } from 'lucide-react';
 import { ModelConfig } from '../../types/model';
@@ -7,10 +8,12 @@ import { useT } from '../../i18n/hooks';
 
 const { TextArea } = Input;
 
+type ModelFields = Omit<ModelConfig, 'stop'> & { stop?: string; extra_body_json?: string };
+
 interface ModelFormProps {
   visible: boolean;
   onClose: () => void;
-  onSubmit: (model: ModelConfig) => void;
+  onSubmit: (model: ModelConfig) => Promise<void>;
   initialValues?: ModelConfig;
   title: string;
 }
@@ -23,113 +26,79 @@ const ModelForm: React.FC<ModelFormProps> = ({
   title
 }) => {
   const t = useT();
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<ModelFields>();
+  const [submitting, setSubmitting] = useState(false);
+  const pending = useRef(false);
+  const session = useRef(0);
+  const record = useRef(initialValues);
+  record.current = initialValues;
+  const recordName = initialValues?.name;
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
 
   React.useEffect(() => {
-    if (visible && initialValues) {
-      // 准备表单初始值
-      const formValues = {
-        ...initialValues,
-        // 设置 provider 和 model_type 默认值
-        provider: initialValues.provider || 'openai',
-        model_type: initialValues.model_type || 'llm',
-        // 处理 extra_body 参数，如果存在则转换为JSON字符串
-        extra_body_json: initialValues.extra_body ? JSON.stringify(initialValues.extra_body, null, 2) : '',
-        // 处理 stop 参数，如果是数组则转换为逗号分隔的字符串
-        stop: Array.isArray(initialValues.stop) ? initialValues.stop.join(', ') : (initialValues.stop || ''),
-        // API密钥字段在编辑模式下保持空白（安全考虑）
-        api_key: ''
-      };
-      form.setFieldsValue(formValues);
-    } else if (visible) {
-      form.resetFields();
-      // 新建时设置默认值
-      form.setFieldsValue({
-        provider: 'openai',
-        model_type: 'llm'
-      });
-    }
-  }, [visible, initialValues, form]);
-
-  const handleSubmit = () => {
-    form.validateFields().then((values) => {
-      // 创建一个干净的对象，只包含有值的参数
-      const cleanedValues: any = {};
-
-      // 处理必填参数
-      cleanedValues.name = values.name;
-      cleanedValues.base_url = values.base_url;
-      cleanedValues.model = values.model;
-
-      // 添加 provider 和 model_type
-      cleanedValues.provider = values.provider || 'openai';
-      cleanedValues.model_type = values.model_type || 'llm';
-
-      // 处理API密钥：编辑模式下如果为空则不包含此字段，让后端保持原值
-      if (!initialValues) {
-        // 新增模式：API key 必须有值
-        cleanedValues.api_key = values.api_key;
-      } else {
-        // 编辑模式：只有用户输入了新值才更新
-        if (values.api_key && values.api_key.trim() !== '') {
-          cleanedValues.api_key = values.api_key.trim();
-        }
-      }
-
-      // 处理可选参数 - 只有明确有值时才添加
-      // 数值参数 - 只有当用户实际输入了值时才包含
-      const numericFields = [
-        'temperature', 'max_tokens', 'max_completion_tokens',
-        'top_p', 'frequency_penalty', 'presence_penalty',
-        'n', 'seed', 'top_logprobs', 'timeout'
-      ];
-
-      numericFields.forEach(field => {
-        const value = values[field];
-        // 检查是否有实际的数值（不是undefined、null、空字符串、或NaN）
-        if (value !== undefined && value !== null && value !== '' && !isNaN(Number(value))) {
-          cleanedValues[field] = Number(value);
-        }
-      });
-
-      // logprobs 开关
-      if (values.logprobs !== undefined && values.logprobs !== null) {
-        cleanedValues.logprobs = values.logprobs;
-      }
-
-      // 处理 stop 参数
-      if (values.stop && values.stop.trim() !== '') {
-        const stopValue = values.stop.trim();
-        if (stopValue.includes(',')) {
-          const stopArray = stopValue.split(',').map((s: string) => s.trim()).filter((s: string) => s !== '');
-          if (stopArray.length > 0) {
-            cleanedValues.stop = stopArray;
-          }
-        } else {
-          cleanedValues.stop = stopValue;
-        }
-      }
-
-      // 处理 extra_body 参数
-      if (values.extra_body_json && values.extra_body_json.trim() !== '') {
-        try {
-          const parsedExtraBody = JSON.parse(values.extra_body_json.trim());
-          if (parsedExtraBody && typeof parsedExtraBody === 'object') {
-            cleanedValues.extra_body = parsedExtraBody;
-          }
-        } catch (e) {
-          // JSON 解析失败时忽略该字段
-          console.warn(t('pages.modelManager.form.invalidJson'), e);
-        }
-      }
-
-      console.log('提交清理后的值:', cleanedValues);
-      onSubmit(cleanedValues as ModelConfig);
-      form.resetFields();
-    }).catch((errorInfo) => {
-      console.log('验证失败:', errorInfo);
+    session.current++;
+    pending.current = false;
+    setSubmitting(false);
+    if (!visible) return;
+    const values = record.current;
+    form.resetFields();
+    form.setFieldsValue({
+      ...values,
+      provider: values?.provider ?? 'openai',
+      model_type: values?.model_type ?? 'llm',
+      extra_body_json: values?.extra_body ? JSON.stringify(values.extra_body, null, 2) : '',
+      stop: Array.isArray(values?.stop) ? values.stop.join(', ') : values?.stop ?? '',
+      api_key: '',
     });
+    setAdvancedExpanded(false);
+  }, [visible, recordName, form]);
+
+  const handleSubmit = async () => {
+    if (pending.current) return;
+    pending.current = true;
+    setSubmitting(true);
+    const owner = session.current;
+    try {
+      await form.validateFields();
+      const values: ModelFields = form.getFieldsValue(true);
+      const cleanedValues: ModelConfig = {
+        name: values.name, base_url: values.base_url, model: values.model,
+        provider: values.provider ?? 'openai', model_type: values.model_type ?? 'llm',
+      };
+      if (!initialValues || values.api_key?.trim()) cleanedValues.api_key = values.api_key?.trim() ?? '';
+      const numericFields = ['temperature', 'max_tokens', 'max_completion_tokens', 'top_p',
+        'frequency_penalty', 'presence_penalty', 'n', 'seed', 'top_logprobs', 'timeout'] as const;
+      for (const field of numericFields) {
+        const value = values[field];
+        if (value !== undefined && value !== null && Number.isFinite(value)) cleanedValues[field] = value;
+      }
+      if (values.logprobs !== undefined) cleanedValues.logprobs = values.logprobs;
+      if (values.stop?.trim()) {
+        const stop = values.stop.trim();
+        cleanedValues.stop = stop.includes(',') ? stop.split(',').map(value => value.trim()).filter(Boolean) : stop;
+      }
+      if (values.extra_body_json?.trim()) {
+        let parsed: JsonObject;
+        try { parsed = JSON.parse(values.extra_body_json); }
+        catch {
+          form.setFields([{ name: 'extra_body_json', errors: [t('pages.modelManager.form.invalidJson')] }]);
+          setAdvancedExpanded(true);
+          return;
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          form.setFields([{ name: 'extra_body_json', errors: [t('pages.modelManager.form.invalidJson')] }]);
+          return;
+        }
+        cleanedValues.extra_body = parsed;
+      }
+      if (owner !== session.current) return;
+      await onSubmit(cleanedValues);
+      if (owner === session.current) form.resetFields();
+    } catch {
+      // 校验反馈由 Form 展示，请求失败由父页面展示；草稿保持原值。
+    } finally {
+      if (owner === session.current) { pending.current = false; setSubmitting(false); }
+    }
   };
 
   return (
@@ -165,6 +134,7 @@ const ModelForm: React.FC<ModelFormProps> = ({
         </Button>,
         <Button
           key="submit"
+          loading={submitting}
           onClick={handleSubmit}
           style={{
             background: 'linear-gradient(135deg, #b85845 0%, #a0826d 100%)',

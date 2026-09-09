@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { App, message } from 'antd';
 import { useT } from '../i18n/hooks';
 
@@ -15,13 +15,16 @@ interface AgentGroup {
  */
 export const useAgentBatchDelete = (
   filteredGroups: AgentGroup[],
-  handleDeleteAgent: (agentName: string) => Promise<boolean | void>
+  deleteAgents: (names: string[]) => Promise<{ succeededIds: string[]; failed: { id: string; message: string }[] }>
 ) => {
   const t = useT();
   const { modal } = App.useApp();
   const [visible, setVisible] = useState(false);
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
   const [deleting, setDeleting] = useState(false);
+  const pending = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   /**
    * 打开批量删除抽屉
@@ -81,33 +84,24 @@ export const useAgentBatchDelete = (
       cancelText: t('common.cancel'),
       okButtonProps: { danger: true },
       onOk: async () => {
+        if (pending.current) return;
+        pending.current = true;
         setDeleting(true);
-        let successCount = 0;
-        let failCount = 0;
-
-        for (const agentName of selectedAgents) {
-          try {
-            await handleDeleteAgent(agentName);
-            successCount++;
-          } catch (error) {
-            failCount++;
-            console.error(`Failed to delete agent ${agentName}:`, error);
+        try {
+          const result = await deleteAgents(selectedAgents);
+          if (!mounted.current) return;
+          setSelectedAgents(current => current.filter(name => !result.succeededIds.includes(name)));
+          if (!result.failed.length) setVisible(false);
+          if (result.failed.length === 0) {
+            message.success(t('pages.agentManager.batchDelete.success', { count: result.succeededIds.length }));
+          } else {
+            message.warning(t('pages.agentManager.batchDelete.partial', { success: result.succeededIds.length, failed: result.failed.length }));
           }
-        }
-
-        setDeleting(false);
-        setSelectedAgents([]);
-        setVisible(false);
-
-        if (failCount === 0) {
-          message.success(t('pages.agentManager.batchDelete.success', { 
-            count: successCount 
-          }));
-        } else {
-          message.warning(t('pages.agentManager.batchDelete.partial', { 
-            success: successCount, 
-            failed: failCount 
-          }));
+        } catch {
+          if (mounted.current) message.warning(t('pages.agentManager.batchDelete.partial', { success: 0, failed: selectedAgents.length }));
+        } finally {
+          pending.current = false;
+          if (mounted.current) setDeleting(false);
         }
       }
     });

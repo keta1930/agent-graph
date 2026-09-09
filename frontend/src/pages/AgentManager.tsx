@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import { getErrorMessage } from '../utils/errors';
+import React, { useState, useRef, useEffect } from 'react';
 import { Layout, Button, Input, Tag, Spin, Space, Modal, Form, Typography } from 'antd';
 import { Plus, RefreshCw, Bot, Search as SearchIcon, Upload, Trash2 } from 'lucide-react';
-import { AgentConfig, importAgents } from '../services/agentService';
+import { AgentConfig, Agent, importAgents } from '../services/agentService';
 import { useT } from '../i18n/hooks';
 import { useAgentManager } from '../hooks/useAgentManager';
 import { useAgentBatchDelete } from '../hooks/useAgentBatchDelete';
@@ -20,7 +21,9 @@ const { Title } = Typography;
  */
 const AgentManager: React.FC = () => {
   const t = useT();
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<AgentConfig>();
+  const detailRequest = useRef(0);
+  useEffect(() => () => { detailRequest.current += 1; }, []);
 
   // 使用自定义 Hook 管理数据和业务逻辑
   const {
@@ -37,23 +40,25 @@ const AgentManager: React.FC = () => {
     handleCreateAgent,
     handleUpdateAgent,
     handleDeleteAgent,
+    handleBatchDelete,
     fetchAgentDetail,
   } = useAgentManager();
 
   // 批量删除逻辑
-  const batchDelete = useAgentBatchDelete(filteredGroups, handleDeleteAgent);
+  const batchDelete = useAgentBatchDelete(filteredGroups, handleBatchDelete);
 
   // Modal 状态
   const [modalVisible, setModalVisible] = useState(false);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [editingAgent, setEditingAgent] = useState<string | null>(null);
-  const [selectedAgent, setSelectedAgent] = useState<any>(null);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [importing, setImporting] = useState(false);
 
   /**
    * 显示创建 Modal
    */
   const showCreateModal = () => {
+    detailRequest.current += 1;
     setEditingAgent(null);
     form.resetFields();
     setModalVisible(true);
@@ -63,9 +68,12 @@ const AgentManager: React.FC = () => {
    * 显示编辑 Modal
    */
   const showEditModal = async (agentName: string) => {
+    const owner = ++detailRequest.current;
     const agentData = await fetchAgentDetail(agentName);
+    if (owner !== detailRequest.current) return;
     if (agentData) {
       setEditingAgent(agentName);
+      form.resetFields();
       form.setFieldsValue(agentData.agent_config);
       setModalVisible(true);
     }
@@ -75,7 +83,9 @@ const AgentManager: React.FC = () => {
    * 显示详情 Modal
    */
   const showDetailModal = async (agentName: string) => {
+    const owner = ++detailRequest.current;
     const agentData = await fetchAgentDetail(agentName);
+    if (owner !== detailRequest.current) return;
     if (agentData) {
       setSelectedAgent(agentData);
       setDetailModalVisible(true);
@@ -107,7 +117,7 @@ const AgentManager: React.FC = () => {
       if (success) {
         setModalVisible(false);
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Form validation error:', error);
     }
   };
@@ -119,8 +129,8 @@ const AgentManager: React.FC = () => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json,.jsonl,.xlsx,.xls,.parquet';
-    input.onchange = async (e: any) => {
-      const file = e.target.files?.[0];
+    input.onchange = async () => {
+      const file = input.files?.[0];
       if (!file) return;
 
       // 验证文件格式
@@ -143,10 +153,10 @@ const AgentManager: React.FC = () => {
         });
         // 刷新列表
         loadAgents();
-      } catch (error: any) {
+      } catch (error) {
         Modal.error({
           title: t('pages.agentManager.import.failed'),
-          content: error.response?.data?.detail || error.message || t('pages.agentManager.import.unknownError'),
+          content: getErrorMessage(error, t('pages.agentManager.import.unknownError')),
         });
       } finally {
         setImporting(false);
@@ -275,7 +285,7 @@ const AgentManager: React.FC = () => {
         }
         open={modalVisible}
         onOk={handleSubmit}
-        onCancel={() => setModalVisible(false)}
+        onCancel={() => { detailRequest.current += 1; setModalVisible(false); }}
         width={720}
         footer={[
           <Button
@@ -337,11 +347,11 @@ const AgentManager: React.FC = () => {
             fontWeight: 600,
             letterSpacing: '0.5px'
           }}>
-            {t('pages.agentManager.detailModalTitle', { name: selectedAgent?.name })}
+            {t('pages.agentManager.detailModalTitle', { name: selectedAgent?.agent_config.name ?? '' })}
           </div>
         }
         open={detailModalVisible}
-        onCancel={() => setDetailModalVisible(false)}
+        onCancel={() => { detailRequest.current += 1; setDetailModalVisible(false); }}
         footer={[
           <Button
             key="close"

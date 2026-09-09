@@ -1,90 +1,57 @@
-// src/components/graph-editor/GraphCanvas.tsx
-import React, { useCallback, useState, useEffect } from 'react';
-import ReactFlow, {
-  Controls,
-  MiniMap,
-  NodeTypes,
-  EdgeTypes,
-  Connection,
-  Edge,
-  Node,
-  OnNodesChange,
-  OnEdgesChange,
-  OnConnect,
-  applyNodeChanges,
-  applyEdgeChanges,
-  ConnectionLineType,
-} from 'reactflow';
+// ReactFlow 临时坐标只在拖动结束或保存前写入图模型。
+import React, { useCallback, useState, useEffect, useRef } from 'react';
+import ReactFlow, { Controls, MiniMap, NodeTypes, EdgeTypes, Edge, Node, OnNodesChange, OnEdgesChange, OnConnect, applyNodeChanges, applyEdgeChanges, ConnectionLineType } from 'reactflow';
+import { shallow } from 'zustand/shallow';
 import 'reactflow/dist/style.css';
 import { useGraphEditorStore } from '../../store/graphEditorStore';
+import type { AgentNode, NodePosition } from '../../types/graph';
 import AgentNodeComponent from './AgentNodeComponent';
 import ButtonEdge from './edges/ButtonEdge';
 import ArcEdge from './edges/ArcEdge';
-import BackgroundControls, { renderBackground, BackgroundType } from './canvas/BackgroundControls';
+import BackgroundControls, { CanvasBackground, BackgroundType } from './canvas/BackgroundControls';
 
-const nodeTypes: NodeTypes = {
-  agent: AgentNodeComponent,
-};
-
-const edgeTypes: EdgeTypes = {
-  button: ButtonEdge,  // 标准连接边
-  arc: ArcEdge,        // handoffs 循环连接边
-};
+const nodeTypes: NodeTypes = { agent: AgentNodeComponent };
+const edgeTypes: EdgeTypes = { button: ButtonEdge, arc: ArcEdge };
+type NodeData = AgentNode & { id: string; system_tools: string[]; selected: boolean; onClick: () => void };
+const getEdgeStyle = (source: AgentNode): React.CSSProperties => ({ stroke: source.level == null ? '#8b7355' : ['#b85845', '#cd7f32', '#d4a574', '#a0826d', '#8b7355'][Math.max(0, Math.min(source.level, 4))], strokeWidth: 2 });
+const shouldAnimateEdge = (source: AgentNode) => source.level != null;
 
 const GraphCanvas: React.FC = () => {
-  const {
-    currentGraph,
-    selectedNode,
-    selectNode,
-    updateNodePosition,
-    addConnection,
-    removeConnection
-  } = useGraphEditorStore();
-
-  const [nodes, setNodes] = useState<Node[]>([]);
+  const graphNodes = useGraphEditorStore(state => state.currentGraph?.nodes);
+  const selectedNode = useGraphEditorStore(state => state.selectedNode);
+  const selectNode = useGraphEditorStore(state => state.selectNode);
+  const removeNode = useGraphEditorStore(state => state.removeNode);
+  const addConnection = useGraphEditorStore(state => state.addConnection);
+  const removeConnection = useGraphEditorStore(state => state.removeConnection);
+  const updateNodePositions = useGraphEditorStore(state => state.updateNodePositions);
+  const registerPositionFlusher = useGraphEditorStore(state => state.registerPositionFlusher);
+  const [nodes, setNodes] = useState<Node<NodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  const nodesRef = useRef<Node<NodeData>[]>([]);
+  const edgesRef = useRef<Edge[]>([]);
+  const pendingPositions = useRef<Record<string, NodePosition>>({});
   const [backgroundType, setBackgroundType] = useState<BackgroundType>('dots');
+  const flushPositions = useCallback(() => {
+    const positions = pendingPositions.current;
+    pendingPositions.current = {};
+    updateNodePositions(positions);
+  }, [updateNodePositions]);
+  useEffect(() => registerPositionFlusher(flushPositions), [registerPositionFlusher, flushPositions]);
 
-  /**
-   * 当图数据变化时，将图模型转换为 ReactFlow 的节点和边
-   *
-   * 转换逻辑包括：
-   * 1. 将图节点转换为 ReactFlow 节点，附加必要的数据和回调
-   * 2. 根据 handoffs 属性区分连接类型，向上游连接使用弧线边
-   * 3. 常规连接使用标准边，排除已经用弧线表示的连接
-   */
   useEffect(() => {
-    if (!currentGraph) {
-      setNodes([]);
-      setEdges([]);
-      return;
-    }
-
-    const flowNodes = currentGraph.nodes.map(node => ({
-      id: node.id!,
-      type: 'agent',
-      position: node.position || { x: 100, y: 100 },
-      data: {
-        id: node.id!,
-        name: node.name,
-        description: node.description || "",
-        is_subgraph: node.is_subgraph,
-        input_nodes: node.input_nodes || [],
-        output_nodes: node.output_nodes || [],
-        model_name: node.model_name,
-        agent_name: node.agent_name,
-        subgraph_name: node.subgraph_name,
-        mcp_servers: node.mcp_servers || [],
-        system_tools: node.system_tools || [],
-        handoffs: node.handoffs,
-        level: node.level,
-        selected: false,
-        onClick: () => selectNode(node.id!)
-      },
-    }));
-
+    const currentGraph = { nodes: graphNodes ?? [] };
+    const previous = new Map(nodesRef.current.map(node => [node.id, node]));
+    const selection = useGraphEditorStore.getState().selectedNode;
+    const flowNodes = currentGraph.nodes.map(node => {
+      const old = previous.get(node.id!);
+      const data: NodeData = { ...node, id: node.id!, system_tools: node.system_tools ?? [], selected: node.id === selection, onClick: old?.data.onClick ?? (() => selectNode(node.id!)) };
+      const stableData = old && shallow(old.data, data) ? old.data : data;
+      const position = pendingPositions.current[node.id!] ?? node.position ?? { x: 100, y: 100 };
+      if (old && old.data === stableData && old.position.x === position.x && old.position.y === position.y) return old;
+      return { ...old, id: node.id!, type: 'agent', position, data: stableData, selected: node.id === selection };
+    });
+    nodesRef.current = flowNodes;
     setNodes(flowNodes);
-
     const newEdges: Edge[] = [];
     const nodeMap = new Map(currentGraph.nodes.map(n => [n.name, n]));
     const handoffConnections = new Set<string>();
@@ -144,116 +111,56 @@ const GraphCanvas: React.FC = () => {
               target: targetNode.id,
               sourceHandle: 'output',
               targetHandle: 'input',
-              style: getEdgeStyle(sourceNode, targetNode),
-              animated: shouldAnimateEdge(sourceNode, targetNode),
+              style: getEdgeStyle(sourceNode),
+              animated: shouldAnimateEdge(sourceNode),
             });
           }
         }
       });
     });
 
+    edgesRef.current = newEdges;
     setEdges(newEdges);
-  }, [currentGraph, selectedNode, selectNode]);
+  }, [graphNodes, selectNode]);
 
-  /**
-   * 根据源节点的执行层级确定边的颜色 - 使用大地色系
-   */
-  const getEdgeStyle = (sourceNode: any, _targetNode: any) => {
-    let style: any = { 
-      stroke: '#8b7355', 
-      strokeWidth: 2
-    };
+  useEffect(() => {
+    const next = nodesRef.current.map(node => {
+      const selected = node.id === selectedNode;
+      return node.selected === selected && node.data.selected === selected ? node : { ...node, selected, data: { ...node.data, selected } };
+    });
+    nodesRef.current = next;
+    setNodes(next);
+  }, [selectedNode]);
 
-    if (sourceNode.level !== undefined && sourceNode.level !== null) {
-      const levelColors = ['#b85845', '#cd7f32', '#d4a574', '#a0826d', '#8b7355'];
-      const colorIndex = Math.min(sourceNode.level, levelColors.length - 1);
-      style.stroke = levelColors[colorIndex];
-    }
-
-    return style;
-  };
-
-  const shouldAnimateEdge = (sourceNode: any, _targetNode: any) => {
-    return (sourceNode.level !== undefined && sourceNode.level !== null);
-  };
-
-  const onNodesChange: OnNodesChange = useCallback(
-    (changes) => {
-      const updatedNodes = applyNodeChanges(changes, nodes);
-      setNodes(updatedNodes);
-
-      changes.forEach(change => {
-        if (change.type === 'position' && change.position && change.id) {
-          updateNodePosition(change.id, change.position);
-        }
-      });
-    },
-    [nodes, updateNodePosition]
-  );
-
-  const onEdgesChange: OnEdgesChange = useCallback(
-    (changes: any[]) => {
-      setEdges((edges) => {
-        const newEdges = applyEdgeChanges(changes, edges);
-
-        changes.forEach(change => {
-          if (change.type === 'reset') {
-            const edgesToRemove = edges.filter(edge => !newEdges.some(newEdge => newEdge.id === edge.id));
-            edgesToRemove.forEach(edge => {
-              if (edge.source && edge.target && !edge.data?.isHandoffEdge) {
-                removeConnection(edge.source, edge.target);
-              }
-            });
-          } else if (change.type === 'remove') {
-            const edgeToRemove = edges.find(edge => edge.id === change.id);
-            if (edgeToRemove?.source && edgeToRemove?.target && !edgeToRemove.data?.isHandoffEdge) {
-              removeConnection(edgeToRemove.source, edgeToRemove.target);
-            }
-          }
-        });
-
-        return newEdges;
-      });
-    },
-    [removeConnection]
-  );
-
-  const onConnect: OnConnect = useCallback(
-    (connection: Connection) => {
-      if (connection.source && connection.target &&
-          connection.sourceHandle === 'output' &&
-          connection.targetHandle === 'input') {
-        addConnection(connection.source, connection.target);
-
-        const newEdge: Edge = {
-          id: `e-${connection.source}-${connection.target}`,
-          type: 'button',
-          source: connection.source,
-          target: connection.target,
-          sourceHandle: connection.sourceHandle,
-          targetHandle: connection.targetHandle,
-          style: { stroke: '#8b7355', strokeWidth: 2 }
-        };
-
-        setEdges(eds => [...eds, newEdge]);
+  const onNodesChange: OnNodesChange = useCallback(changes => {
+    const next = applyNodeChanges<NodeData>(changes, nodesRef.current);
+    nodesRef.current = next; setNodes(next);
+    for (const change of changes) {
+      if (change.type === 'position' && change.position) pendingPositions.current[change.id] = change.position;
+      if (change.type === 'remove') { delete pendingPositions.current[change.id]; removeNode(change.id); }
+      if (change.type === 'select') {
+        if (change.selected) selectNode(change.id);
+        else if (useGraphEditorStore.getState().selectedNode === change.id) selectNode(null);
       }
-    },
-    [addConnection]
-  );
-
-  const onPaneClick = useCallback(() => {
-    selectNode(null);
-  }, [selectNode]);
-
-  const nodeColor = (node: Node) => {
-    const nodeData = node.data;
-    
-    if (nodeData.selected) return '#b85845';
-    if (nodeData.is_subgraph) return '#cd7f32';
-    if (nodeData.handoffs && nodeData.handoffs > 1) return '#d4a574';
-    if (nodeData.input_nodes?.includes('start')) return '#a0826d';
-    if (nodeData.output_nodes?.includes('end')) return '#b85845';
-    
+    }
+    if (changes.some(change => change.type === 'position' && change.dragging === false)) flushPositions();
+  }, [removeNode, selectNode, flushPositions]);
+  const onEdgesChange: OnEdgesChange = useCallback(changes => {
+    const old = edgesRef.current;
+    const next = applyEdgeChanges(changes, old);
+    edgesRef.current = next; setEdges(next);
+    for (const edge of old) if (!next.some(item => item.id === edge.id)) removeConnection(edge.source, edge.target);
+  }, [removeConnection]);
+  const onConnect: OnConnect = useCallback(connection => {
+    if (connection.source && connection.target && connection.sourceHandle === 'output' && connection.targetHandle === 'input') addConnection(connection.source, connection.target);
+  }, [addConnection]);
+  const onPaneClick = useCallback(() => selectNode(null), [selectNode]);
+  const nodeColor = (node: Node<NodeData>) => {
+    if (node.selected) return '#b85845';
+    if (node.data.is_subgraph) return '#cd7f32';
+    if (node.data.handoffs && node.data.handoffs > 1) return '#d4a574';
+    if (node.data.input_nodes.includes('start')) return '#a0826d';
+    if (node.data.output_nodes.includes('end')) return '#b85845';
     return '#d4c4b0';
   };
 
@@ -300,6 +207,8 @@ const GraphCanvas: React.FC = () => {
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
+        onNodeDragStop={flushPositions}
+        onSelectionDragStop={flushPositions}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onPaneClick={onPaneClick}
@@ -339,7 +248,7 @@ const GraphCanvas: React.FC = () => {
           }}
           maskColor="rgba(250, 248, 245, 0.6)"
         />
-        {renderBackground(backgroundType)}
+        <CanvasBackground backgroundType={backgroundType} />
       </ReactFlow>
 
       <style>{`

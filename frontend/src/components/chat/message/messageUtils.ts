@@ -1,11 +1,11 @@
 // 消息处理工具函数
-import { ConversationMessage, TaskData, TaskRoundData } from '../../../types/conversation';
+import { ConversationMessage, ConversationRound, TaskData, TaskRoundData, StreamingBlock, TaskBlock } from '../../../types/conversation';
 
 /**
  * 构建工具调用结果映射
  * 从rounds中提取所有工具调用的结果
  */
-export const buildToolResultsMap = (rounds: any[]): Record<string, string> => {
+export const buildToolResultsMap = (rounds: Pick<ConversationRound, 'messages'>[]): Record<string, string> => {
   const toolResults: Record<string, string> = {};
 
   if (Array.isArray(rounds)) {
@@ -21,6 +21,33 @@ export const buildToolResultsMap = (rounds: any[]): Record<string, string> => {
   }
 
   return toolResults;
+};
+
+/** 每批流式块只遍历一次，任务子块保留输入顺序。 */
+export const groupTaskBlocks = (blocks: StreamingBlock[]): Map<string, StreamingBlock[]> => {
+  const groups = new Map<string, StreamingBlock[]>();
+  for (const block of blocks) {
+    if (!block.taskId || block.type === 'task') continue;
+    const group = groups.get(block.taskId);
+    if (group) group.push(block);
+    else groups.set(block.taskId, [block]);
+  }
+  return groups;
+};
+
+export const isTaskBlock = (block: StreamingBlock): block is TaskBlock =>
+  block.type === 'task' && block.taskId !== undefined && block.taskStatus !== undefined;
+
+/** 工具结果来自 JSON 边界，仅接收字符串值。 */
+export const parseToolResults = (content: string): Record<string, string> => {
+  if (!content) return {};
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+  } catch {
+    return {};
+  }
 };
 
 /**

@@ -1,5 +1,7 @@
+import { getErrorMessage } from '../utils/errors';
+import { loadMermaid } from '../utils/mermaid';
 // src/pages/PreviewPage.tsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useId } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Space, Typography, message, Tooltip, Alert } from 'antd';
 import { CheckOutlined } from '@ant-design/icons';
@@ -19,6 +21,11 @@ const decodeParam = (value: string | null): string => {
 
 const PreviewPage: React.FC = () => {
   const [searchParams] = useSearchParams();
+  const container = useRef<HTMLDivElement>(null);
+  const diagramId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const renderRevision = useRef(0);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
 
   const shareId = searchParams.get('id');
   const paramLang = (searchParams.get('lang') || 'text').toLowerCase();
@@ -40,9 +47,10 @@ const PreviewPage: React.FC = () => {
       await navigator.clipboard.writeText(window.location.href);
       message.success('Copy Success');
       setCopied(true);
-      setTimeout(() => setCopied(false), 500);
-    } catch (e: any) {
-      message.error('复制失败：' + (e?.message || String(e)));
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 500);
+    } catch (e) {
+      message.error('复制失败：' + getErrorMessage(e));
     } finally {
       setCopying(false);
     }
@@ -50,6 +58,9 @@ const PreviewPage: React.FC = () => {
 
   // 通过短链ID加载内容（如有），否则使用URL参数
   useEffect(() => {
+    let active = true;
+    setError(null);
+    setLoading(false);
     const load = async () => {
       if (!shareId) {
         setLang(paramLang);
@@ -61,62 +72,41 @@ const PreviewPage: React.FC = () => {
       setError(null);
       try {
         const res = await previewService.getShare(shareId);
+        if (!active) return;
         setLang(res.lang?.toLowerCase() || 'text');
         setTitle(res.title || '内容预览');
         setContent(res.content || '');
-      } catch (e: any) {
-        setError('加载短链内容失败：' + (e?.message || String(e)));
+      } catch (e) {
+        if (!active) return;
+        setError('加载短链内容失败：' + getErrorMessage(e));
         // 回退为参数内容（如果存在）
         setLang(paramLang);
         setTitle(paramTitle);
         setContent(paramContent);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shareId]);
+    void load();
+    return () => { active = false; };
+  }, [shareId, paramLang, paramTitle, paramContent]);
 
-  // Mermaid 渲染：通过 CDN 注入脚本并进行初始化
   useEffect(() => {
-    if (lang !== 'mermaid') return;
+    if (lang !== 'mermaid' || !container.current) return;
+    let active = true;
+    const revision = ++renderRevision.current;
+    const element = container.current;
+    element.textContent = content;
     setError(null);
-
-    const scriptId = 'mermaid-cdn-script';
-    const renderMermaid = () => {
-      try {
-        // @ts-ignore
-        const mermaid = (window as any).mermaid;
-        if (!mermaid) {
-          setError('Mermaid 未加载');
-          return;
-        }
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: 'default',
-          securityLevel: 'loose',
-          fontFamily: 'Segoe UI, Arial, sans-serif'
-        });
-        // 基于页面上的 .mermaid 元素渲染
-        mermaid.init(undefined, '.mermaid');
-      } catch (e: any) {
-        setError('图表渲染失败：' + (e?.message || String(e)));
-      }
-    };
-
-    if (!document.getElementById(scriptId)) {
-      const script = document.createElement('script');
-      script.id = scriptId;
-      script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
-      script.async = true;
-      script.onload = renderMermaid;
-      script.onerror = () => setError('Mermaid 资源加载失败');
-      document.head.appendChild(script);
-    } else {
-      renderMermaid();
-    }
-  }, [lang, content]);
+    void loadMermaid().then(async mermaid => {
+      if (!active) return;
+      const result = await mermaid.render('mermaid-' + diagramId + '-' + revision, content);
+      if (!active) return;
+      element.innerHTML = result.svg;
+      result.bindFunctions?.(element);
+    }).catch(error => { if (active) setError('图表渲染失败：' + getErrorMessage(error)); });
+    return () => { active = false; };
+  }, [lang, content, diagramId]);
 
   const renderContent = () => {
     if (!content?.trim()) {
@@ -128,7 +118,7 @@ const PreviewPage: React.FC = () => {
         <iframe
           title="HTML 预览"
           srcDoc={content}
-          sandbox="allow-scripts allow-popups allow-same-origin"
+          sandbox="allow-scripts allow-popups"
           style={{ width: '100%', height: '80vh', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}
         />
       );
@@ -140,7 +130,7 @@ const PreviewPage: React.FC = () => {
         <iframe
           title="SVG 预览"
           srcDoc={svgDoc}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts"
           style={{ width: '100%', height: '80vh', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}
         />
       );
@@ -152,9 +142,7 @@ const PreviewPage: React.FC = () => {
           {error && (
             <Alert type="error" message={error} showIcon style={{ marginBottom: 12 }} />
           )}
-          <div className="mermaid" style={{ overflow: 'auto' }}>
-            {content}
-          </div>
+          <div ref={container} className="mermaid" style={{ overflow: 'auto' }} />
         </div>
       );
     }
@@ -173,7 +161,7 @@ const PreviewPage: React.FC = () => {
         <Title level={4} style={{ margin: 0 }}>{title}</Title>
         <Space>
           <Tooltip title="Copy URL">
-            <Button onClick={handleCopyLink} icon={copied ? <CheckOutlined /> : undefined} style={copied ? { color: '#52c41a', borderColor: '#52c41a' } : undefined}>
+            <Button loading={copying} onClick={handleCopyLink} icon={copied ? <CheckOutlined /> : undefined} style={copied ? { color: '#52c41a', borderColor: '#52c41a' } : undefined}>
               URL
             </Button>
           </Tooltip>

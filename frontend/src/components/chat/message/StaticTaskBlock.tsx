@@ -1,16 +1,13 @@
 // src/components/chat/message/StaticTaskBlock.tsx
 import React, { useState } from 'react';
-import { Tag, Typography } from 'antd';
-import { ChevronDown, ChevronRight, CheckCircle, Bot } from 'lucide-react';
-import { ToolOutlined } from '@ant-design/icons';
+import { Tag } from 'antd';
+import { ChevronDown, ChevronRight, CheckCircle } from 'lucide-react';
 import { TaskData } from '../../../types/conversation';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import SmartMarkdown from './SmartMarkdown';
+import ReasoningDisplay from './ReasoningDisplay';
+import ToolCallDisplay from './ToolCallDisplay';
+import { useT } from '../../../i18n/hooks';
 import './TaskBlock.css';
-
-const { Text } = Typography;
 
 interface StaticTaskBlockProps {
   taskData: TaskData;
@@ -19,170 +16,13 @@ interface StaticTaskBlockProps {
   conversationId?: string;
 }
 
-// 复用 TaskBlock 的组件
-const ReasoningDisplay: React.FC<{ content: string }> = ({ content }) => {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div style={{
-      margin: '12px 0',
-      borderRadius: '6px',
-      background: 'rgba(255, 255, 255, 0.85)',
-      border: '1px solid rgba(184, 88, 69, 0.2)',
-      boxShadow: '0 1px 3px rgba(139, 115, 85, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.8)',
-      transition: 'all 0.3s cubic-bezier(0.23, 1, 0.32, 1)'
-    }}>
-      <div
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          padding: '12px 14px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          cursor: 'pointer',
-          userSelect: 'none'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Bot size={16} strokeWidth={1.5} style={{ color: '#b85845' }} />
-          <Text strong style={{ color: '#2d2d2d', fontSize: '14px' }}>AI思考过程</Text>
-          <Tag style={{
-            background: 'rgba(184, 88, 69, 0.08)',
-            color: '#b85845',
-            border: '1px solid rgba(184, 88, 69, 0.25)',
-            borderRadius: '6px',
-            fontWeight: 500,
-            padding: '2px 10px',
-            fontSize: '12px'
-          }}>
-            推理
-          </Tag>
-        </div>
-        {expanded ? (
-          <ChevronDown size={18} strokeWidth={1.5} style={{ color: '#8b7355' }} />
-        ) : (
-          <ChevronRight size={18} strokeWidth={1.5} style={{ color: '#8b7355' }} />
-        )}
-      </div>
-
-      {expanded && (
-        <div style={{
-          padding: '0 14px 12px',
-          borderTop: '1px solid rgba(139, 115, 85, 0.15)',
-          maxHeight: '400px',
-          overflow: 'auto'
-        }}>
-          <div style={{ marginTop: '12px' }}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {content}
-            </ReactMarkdown>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const ToolCallDisplay: React.FC<{ toolCall: any; result?: string }> = ({ toolCall, result }) => {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div style={{
-      margin: '12px 0',
-      borderRadius: '6px',
-      background: 'rgba(255, 255, 255, 0.85)',
-      border: '1px solid rgba(160, 130, 109, 0.2)',
-      boxShadow: '0 1px 3px rgba(139, 115, 85, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.8)',
-      transition: 'all 0.3s cubic-bezier(0.23, 1, 0.32, 1)'
-    }}>
-      <div
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          padding: '12px 14px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          cursor: 'pointer',
-          userSelect: 'none'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <ToolOutlined style={{ color: '#a0826d', fontSize: '16px' }} />
-          <Text strong style={{ color: '#2d2d2d', fontSize: '14px' }}>{toolCall.function?.name}</Text>
-          <Tag style={{
-            background: 'rgba(160, 130, 109, 0.08)',
-            color: '#a0826d',
-            border: '1px solid rgba(160, 130, 109, 0.2)',
-            borderRadius: '6px',
-            fontWeight: 500,
-            padding: '2px 10px',
-            fontSize: '12px'
-          }}>
-            工具调用
-          </Tag>
-        </div>
-        {expanded ? (
-          <ChevronDown size={18} strokeWidth={1.5} style={{ color: '#8b7355' }} />
-        ) : (
-          <ChevronRight size={18} strokeWidth={1.5} style={{ color: '#8b7355' }} />
-        )}
-      </div>
-
-      {expanded && (
-        <div style={{
-          padding: '0 14px 12px',
-          borderTop: '1px solid rgba(139, 115, 85, 0.15)',
-          maxHeight: '400px',
-          overflow: 'auto'
-        }}>
-          <div style={{ marginTop: '12px' }}>
-            <Text style={{ color: 'rgba(45, 45, 45, 0.65)', fontSize: '12px', fontWeight: 500 }}>参数</Text>
-            <div style={{ marginTop: '8px' }}>
-              <SyntaxHighlighter
-                language="json"
-                style={oneLight}
-                customStyle={{
-                  background: 'rgba(245, 243, 240, 0.6)',
-                  padding: '10px 12px',
-                  fontSize: '12px',
-                  borderRadius: '4px',
-                  border: '1px solid rgba(139, 115, 85, 0.1)'
-                }}
-              >
-                {toolCall.function?.arguments || '{}'}
-              </SyntaxHighlighter>
-            </div>
-          </div>
-
-          {result && (
-            <div style={{ marginTop: '12px' }}>
-              <Text style={{ color: 'rgba(45, 45, 45, 0.65)', fontSize: '12px', fontWeight: 500 }}>结果</Text>
-              <div style={{
-                marginTop: '8px',
-                padding: '10px 12px',
-                background: 'rgba(245, 243, 240, 0.6)',
-                borderRadius: '4px',
-                border: '1px solid rgba(139, 115, 85, 0.1)',
-                fontSize: '13px',
-                color: '#2d2d2d',
-                fontFamily: "'SF Mono', monospace"
-              }}>
-                {result}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
 const StaticTaskBlock: React.FC<StaticTaskBlockProps> = ({
   taskData,
   toolCallId,
   toolResults = {},
   conversationId
 }) => {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
 
   // 找到对应的 round
@@ -229,7 +69,7 @@ const StaticTaskBlock: React.FC<StaticTaskBlockProps> = ({
               border: '1px solid rgba(160, 130, 109, 0.25)'
             }}
           >
-            已完成
+            {t('components.taskBlock.statusCompleted')}
           </Tag>
           <Tag style={{
             background: 'rgba(184, 88, 69, 0.08)',
@@ -262,12 +102,12 @@ const StaticTaskBlock: React.FC<StaticTaskBlockProps> = ({
 
             return (
               <div key={msgIndex} className="task-message-block">
-                {/* Reasoning content */}
-                {(message as any).reasoning_content && (
-                  <ReasoningDisplay content={(message as any).reasoning_content} />
+                {/* 思考过程 */}
+                {message.reasoning_content && (
+                  <ReasoningDisplay content={message.reasoning_content} />
                 )}
                 
-                {/* Main content */}
+                {/* 消息正文 */}
                 {message.content && (
                   <div style={{
                     color: '#2d2d2d',
@@ -276,19 +116,18 @@ const StaticTaskBlock: React.FC<StaticTaskBlockProps> = ({
                     letterSpacing: '0.3px',
                     fontFamily: "Cambria, Georgia, 'Times New Roman', serif, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', serif"
                   }}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {message.content}
-                    </ReactMarkdown>
+                    <SmartMarkdown content={message.content} conversationId={conversationId} />
                   </div>
                 )}
                 
-                {/* Tool calls */}
+                {/* 工具调用 */}
                 {message.tool_calls && message.tool_calls.length > 0 && (
                   <div>
                     {message.tool_calls.map((toolCall, index) => (
                       <ToolCallDisplay
                         key={toolCall.id || index}
                         toolCall={toolCall}
+                        conversationId={conversationId}
                         result={toolCall.id ? roundToolResults[toolCall.id] : undefined}
                       />
                     ))}
@@ -303,4 +142,4 @@ const StaticTaskBlock: React.FC<StaticTaskBlockProps> = ({
   );
 };
 
-export default StaticTaskBlock;
+export default React.memo(StaticTaskBlock);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Layout,
   Card,
@@ -43,17 +43,17 @@ const TaskDetail: React.FC = () => {
   const t = useT();
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
 
-  const {
-    currentTask,
-    loading,
-    error,
-    loadTask,
-    updateTaskStatus,
-    deleteTask,
-    clearCurrentTask,
-    getTaskNextRunTime,
-    loadScheduledJobs
-  } = useTaskStore();
+  const target = useRef(taskId);
+  target.current = taskId;
+  const currentTask = useTaskStore(state => state.currentTask);
+  const loading = useTaskStore(state => state.loading);
+  const error = useTaskStore(state => state.error);
+  const loadTask = useTaskStore(state => state.loadTask);
+  const updateTaskStatus = useTaskStore(state => state.updateTaskStatus);
+  const deleteTask = useTaskStore(state => state.deleteTask);
+  const clearCurrentTask = useTaskStore(state => state.clearCurrentTask);
+  const getTaskNextRunTime = useTaskStore(state => state.getTaskNextRunTime);
+  const loadScheduledJobs = useTaskStore(state => state.loadScheduledJobs);
 
   useEffect(() => {
     if (taskId) {
@@ -61,6 +61,7 @@ const TaskDetail: React.FC = () => {
       loadScheduledJobs();
     }
     return () => {
+      target.current = undefined;
       clearCurrentTask();
     };
   }, [taskId, loadTask, loadScheduledJobs, clearCurrentTask]);
@@ -68,18 +69,18 @@ const TaskDetail: React.FC = () => {
   const handleStatusToggle = async () => {
     if (!currentTask) return;
     const newStatus = currentTask.status === TaskStatus.ACTIVE ? TaskStatus.PAUSED : TaskStatus.ACTIVE;
-    const success = await updateTaskStatus(currentTask.id, newStatus);
-    if (success) {
-      loadTask(currentTask.id);
-    }
+    try {
+      await updateTaskStatus(currentTask.id, newStatus);
+      if (target.current === currentTask.id) void loadTask(currentTask.id);
+    } catch { /* store.error 由页面展示。 */ }
   };
 
   const handleDelete = async () => {
     if (!currentTask) return;
-    const success = await deleteTask(currentTask.id);
-    if (success) {
-      navigate('/tasks');
-    }
+    try {
+      await deleteTask(currentTask.id);
+      if (target.current === currentTask.id) navigate('/tasks');
+    } catch { /* store.error 由页面展示。 */ }
   };
 
   const handleJumpToChat = (conversationId: string) => {

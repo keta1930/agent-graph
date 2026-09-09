@@ -1,4 +1,7 @@
 // src/components/graph-editor/NodePropertiesPanel.tsx
+import { useShallow } from 'zustand/react/shallow';
+import type { AgentNode } from '../../types/graph';
+import { validateNodeName } from '../../utils/graphEditorModel';
 import React, { useEffect, useState } from 'react';
 import {
   Form, Input, Select, Button, Tag,
@@ -20,13 +23,15 @@ import MCPSelector from '../common/MCPSelector';
 const { TextArea } = Input;
 const { Option } = Select;
 
+type NodeFormValues = Omit<Partial<AgentNode>, 'output_enabled'> & { node_type?: 'subgraph' | 'agent'; output_enabled?: 'enabled' | 'disabled' };
+
 const NodePropertiesPanel: React.FC = () => {
   const t = useT();
-  const [form] = Form.useForm();
-  const { currentGraph, selectedNode, updateNode, removeNode, graphs, selectNode } = useGraphEditorStore();
-  const { models, fetchModels } = useModelStore();
-  const { config, fetchConfig } = useMCPStore();
-  const { agents, fetchAgents } = useAgentStore();
+  const [form] = Form.useForm<NodeFormValues>();
+  const { currentGraph, selectedNode, updateNode, removeNode, graphs, selectNode } = useGraphEditorStore(useShallow(state => ({ currentGraph: state.currentGraph, selectedNode: state.selectedNode, updateNode: state.updateNode, removeNode: state.removeNode, graphs: state.graphs, selectNode: state.selectNode })));
+  const { models, fetchModels } = useModelStore(useShallow(state => ({ models: state.models, fetchModels: state.fetchModels })));
+  const { config, fetchConfig } = useMCPStore(useShallow(state => ({ config: state.config, fetchConfig: state.fetchConfig })));
+  const { agents, fetchAgents } = useAgentStore(useShallow(state => ({ agents: state.agents, fetchAgents: state.fetchAgents })));
   
   const [systemToolCategories, setSystemToolCategories] = useState<ToolCategory[]>([]);
   const [loadingTools, setLoadingTools] = useState(false);
@@ -93,7 +98,6 @@ const NodePropertiesPanel: React.FC = () => {
   useEffect(() => {
     if (node) {
       form.setFieldsValue({
-        name: node.name,
         description: node.description || "",
         agent_name: node.agent_name,
         node_type: node.is_subgraph ? 'subgraph' : 'agent',
@@ -115,38 +119,36 @@ const NodePropertiesPanel: React.FC = () => {
     }
   }, [node, form]);
 
-  // Save node changes
-  const handleValuesChange = (changedValues: any) => {
+  const nodeId = node?.id;
+  const nodeName = node?.name;
+  useEffect(() => { form.setFieldsValue({ name: nodeName }); }, [nodeId, nodeName, form]);
+
+  // 名称输入在 blur/Enter 原子提交，普通字段保持即时编辑。
+  const commitName = () => {
+    if (!node || !selectedNode) return;
+    const name = form.getFieldValue('name');
+    if (name === node.name) return;
+    try { updateNode(selectedNode, { name }); form.setFields([{ name: 'name', errors: [] }]); }
+    catch { form.setFields([{ name: 'name', errors: [t('components.graphEditor.nodePropertiesPanel.nodeNameConflict')] }]); }
+  };
+  const handleValuesChange = (changedValues: NodeFormValues) => {
     if (!selectedNode) return;
-
-    const updates = { ...changedValues };
-
-    // Handle node type change
-    if ('node_type' in changedValues) {
-      updates.is_subgraph = changedValues.node_type === 'subgraph';
-      delete updates.node_type;
-      
+    const { name, node_type, output_enabled, ...fields } = changedValues;
+    void name;
+    const updates: Partial<AgentNode> = { ...fields };
+    if (node_type !== undefined) {
+      updates.is_subgraph = node_type === 'subgraph';
       if (updates.is_subgraph) {
-        updates.model_name = undefined;
-        updates.agent_name = undefined;
+        updates.model_name = undefined; updates.agent_name = undefined;
         form.setFieldsValue({ model_name: undefined, agent_name: undefined });
-      } else {
-        updates.subgraph_name = undefined;
-        form.setFieldsValue({ subgraph_name: undefined });
-      }
+      } else { updates.subgraph_name = undefined; form.setFieldsValue({ subgraph_name: undefined }); }
     }
-
-    // Handle output_enabled change
-    if ('output_enabled' in changedValues) {
-      updates.output_enabled = changedValues.output_enabled === 'enabled';
-    }
-
-    updateNode(selectedNode, updates);
+    if (output_enabled !== undefined) updates.output_enabled = output_enabled === 'enabled';
+    if (Object.keys(updates).length) updateNode(selectedNode, updates);
   };
 
   const handleDelete = () => {
     if (selectedNode && node) {
-      console.log(`Delete node: ${node.name}`);
       removeNode(selectedNode);
       selectNode(null);
     }
@@ -235,11 +237,9 @@ const NodePropertiesPanel: React.FC = () => {
             rules={[
               { required: true, message: t('components.graphEditor.nodePropertiesPanel.nodeNameRequired') },
               {
-                validator: (_, value) => {
-                  if (value && (/[/\\.]/.test(value))) {
-                    return Promise.reject(t('components.graphEditor.nodePropertiesPanel.nodeNameInvalid'));
-                  }
-                  return Promise.resolve();
+                validator: (_, value: string) => {
+                  try { validateNodeName(value ?? '', new Set((currentGraph?.nodes ?? []).filter(item => item.id !== selectedNode).map(item => item.name))); return Promise.resolve(); }
+                  catch { return Promise.reject(t('components.graphEditor.nodePropertiesPanel.nodeNameConflict')); }
                 }
               }
             ]}
@@ -249,7 +249,9 @@ const NodePropertiesPanel: React.FC = () => {
               placeholder={t('components.graphEditor.nodePropertiesPanel.nodeNamePlaceholder')}
               style={inputStyle}
               onFocus={handleFocus}
-              onBlur={handleBlur}
+              onBlur={event => { handleBlur(event); commitName(); }}
+              onPressEnter={commitName}
+              onKeyDown={event => { if (event.key === 'Escape') form.setFieldsValue({ name: node.name }); }}
             />
           </Form.Item>
 
@@ -258,7 +260,7 @@ const NodePropertiesPanel: React.FC = () => {
             name="description"
             tooltip={{
               title: t('components.graphEditor.nodePropertiesPanel.nodeDescriptionTooltip'),
-              overlayStyle: { fontSize: '13px' }
+              styles: { root: { fontSize: '13px' } }
             }}
             style={{ marginBottom: '16px' }}
           >
@@ -323,7 +325,7 @@ const NodePropertiesPanel: React.FC = () => {
                         name="agent_name"
                         tooltip={{
                           title: t('components.graphEditor.nodePropertiesPanel.agentTooltip'),
-                          overlayStyle: { fontSize: '13px' }
+                          styles: { root: { fontSize: '13px' } }
                         }}
                         rules={[
                           {
@@ -403,7 +405,7 @@ const NodePropertiesPanel: React.FC = () => {
             name="system_prompt"
             tooltip={{
               title: t('components.graphEditor.nodePropertiesPanel.systemPromptTooltip'),
-              overlayStyle: { fontSize: '13px' }
+              styles: { root: { fontSize: '13px' } }
             }}
             style={{ marginBottom: '8px' }}
           >
@@ -448,7 +450,7 @@ const NodePropertiesPanel: React.FC = () => {
             name="user_prompt"
             tooltip={{
               title: t('components.graphEditor.nodePropertiesPanel.userPromptTooltip'),
-              overlayStyle: { fontSize: '13px' }
+              styles: { root: { fontSize: '13px' } }
             }}
             style={{ marginBottom: '8px' }}
           >
@@ -495,7 +497,7 @@ const NodePropertiesPanel: React.FC = () => {
                 name="handoffs"
                 tooltip={{
                   title: t('components.graphEditor.nodePropertiesPanel.loopCountTooltip'),
-                  overlayStyle: { fontSize: '13px' }
+                  styles: { root: { fontSize: '13px' } }
                 }}
                 style={{ marginBottom: '0' }}
               >
@@ -512,7 +514,7 @@ const NodePropertiesPanel: React.FC = () => {
                 name="max_iterations"
                 tooltip={{
                   title: t('components.graphEditor.nodePropertiesPanel.maxIterationsTooltip'),
-                  overlayStyle: { fontSize: '13px' }
+                  styles: { root: { fontSize: '13px' } }
                 }}
                 style={{ marginBottom: '0' }}
               >
@@ -589,7 +591,7 @@ const NodePropertiesPanel: React.FC = () => {
                 label={<span style={labelStyle}>{t('components.graphEditor.nodePropertiesPanel.inputNodes')}</span>}
                 tooltip={{
                   title: t('components.graphEditor.nodePropertiesPanel.inputNodesTooltip'),
-                  overlayStyle: { fontSize: '13px' }
+                  styles: { root: { fontSize: '13px' } }
                 }}
                 style={{ marginBottom: '0' }}
               >
@@ -644,7 +646,7 @@ const NodePropertiesPanel: React.FC = () => {
                 label={<span style={labelStyle}>{t('components.graphEditor.nodePropertiesPanel.outputNodes')}</span>}
                 tooltip={{
                   title: t('components.graphEditor.nodePropertiesPanel.outputNodesTooltip'),
-                  overlayStyle: { fontSize: '13px' }
+                  styles: { root: { fontSize: '13px' } }
                 }}
                 style={{ marginBottom: '0' }}
               >

@@ -1,5 +1,6 @@
 // src/components/chat/sidebar/ConversationItem.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import type { MenuProps } from 'antd';
 import { Modal, Tag, Tooltip, Checkbox, Dropdown, Button, Input, List, Empty, Spin } from 'antd';
 import {
   MoreHorizontal,
@@ -20,6 +21,7 @@ import { useT } from '../../../i18n/hooks';
 import { useI18n } from '../../../i18n/I18nContext';
 import { projectService } from '../../../services/projectService';
 import { ProjectListItem } from '../../../types/project';
+import { getSessionGeneration, isCurrentSession } from '../../../utils/authSession';
 
 const { TextArea } = Input;
 
@@ -30,6 +32,8 @@ interface ConversationItemProps {
   isBatchMode?: boolean;
   isSelected?: boolean;
   onSelect?: (conversationId: string, selected: boolean) => void;
+  onDeleted?: (conversationId: string) => void;
+  selectionDisabled?: boolean;
 }
 
 const ConversationItem: React.FC<ConversationItemProps> = ({
@@ -39,8 +43,17 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
   isBatchMode = false,
   isSelected = false,
   onSelect,
+  onDeleted,
+  selectionDisabled = false,
 }) => {
   const t = useT();
+  const mutationRef = useRef(false);
+  const mountedRef = useRef(false);
+  const [mutating, setMutating] = useState(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [tagsModalVisible, setTagsModalVisible] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -52,125 +65,99 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
   const [newTags, setNewTags] = useState(conversation.tags.join(', '));
   const [isHovered, setIsHovered] = useState(false);
 
-  const {
-    updateConversationStatus,
-    updateConversationTitle,
-    updateConversationTags,
-    deleteConversationPermanent,
-    showNotification,
-    loadConversations,
-  } = useConversationStore();
+  const updateConversationStatus = useConversationStore(state => state.updateConversationStatus);
+  const updateConversationTitle = useConversationStore(state => state.updateConversationTitle);
+  const updateConversationTags = useConversationStore(state => state.updateConversationTags);
+  const deleteConversationPermanent = useConversationStore(state => state.deleteConversationPermanent);
+  const showNotification = useConversationStore(state => state.showNotification);
+  const loadConversations = useConversationStore(state => state.loadConversations);
 
-  // Load projects when modal opens
   useEffect(() => {
-    if (projectModalVisible) {
-      loadProjects();
-    }
-  }, [projectModalVisible]);
-
-  const loadProjects = async () => {
+    if (!projectModalVisible) return;
+    const controller = new AbortController();
     setProjectsLoading(true);
-    try {
-      const response = await projectService.listProjects(100, 0);
-      setProjects(response.projects);
-    } catch (error) {
-      console.error('Failed to load projects:', error);
-      showNotification(t('components.conversationItem.loadProjectsFailed'), 'error');
-    } finally {
-      setProjectsLoading(false);
-    }
-  };
+    void projectService.listProjects(100, 0).then(response => {
+      if (!controller.signal.aborted) setProjects(response.projects);
+    }).catch(() => {
+      if (!controller.signal.aborted) showNotification(t('components.conversationItem.loadProjectsFailed'), 'error');
+    }).finally(() => { if (!controller.signal.aborted) setProjectsLoading(false); });
+    return () => controller.abort();
+  }, [projectModalVisible, showNotification, t]);
 
   const filteredProjects = projects.filter((project) =>
     project.name.toLowerCase().includes(projectSearchQuery.toLowerCase())
   );
 
-  const handleAddToProject = async (projectId: string) => {
+  /** 统一消费 mutation 拒绝，成功删除回调由仍挂载的父级判断当前会话。 */
+  const runMutation = async (operation: () => Promise<void>, onSuccess: () => void, failureKey: string) => {
+    if (mutationRef.current) return;
+    mutationRef.current = true;
+    setMutating(true);
+    const session = getSessionGeneration();
     try {
-      await projectService.moveConversationToProject(conversation.conversation_id, projectId);
-      showNotification(t('components.conversationItem.addedToProject'), 'success');
-      setProjectModalVisible(false);
-      setProjectSearchQuery('');
-      // Refresh conversations to update project info
-      loadConversations();
-    } catch (error) {
-      console.error('Failed to add to project:', error);
-      showNotification(t('components.conversationItem.addToProjectFailed'), 'error');
+      await operation();
+      if (isCurrentSession(session)) onSuccess();
+    } catch {
+      if (isCurrentSession(session) && mountedRef.current) showNotification(t(failureKey), 'error');
+    } finally {
+      mutationRef.current = false;
+      if (mountedRef.current && isCurrentSession(session)) setMutating(false);
     }
   };
 
-  const handleStatusToggle = async (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    try {
-      const newStatus =
-        conversation.status === 'favorite' ? 'active' : 'favorite';
-      await updateConversationStatus(conversation.conversation_id, newStatus);
-      showNotification(
-        newStatus === 'favorite' ? t('components.conversationItem.favorited') : t('components.conversationItem.unfavorited'),
-        'success'
-      );
-    } catch (error) {
-      console.error('Status toggle failed:', error);
-      showNotification(t('components.conversationItem.operationFailed'), 'error');
-    }
+  const handleAddToProject = (projectId: string) => runMutation(async () => {
+    await projectService.moveConversationToProject(conversation.conversation_id, projectId);
+  }, () => {
+    showNotification(t('components.conversationItem.addedToProject'), 'success');
+    if (mountedRef.current) { setProjectModalVisible(false); setProjectSearchQuery(''); }
+    void loadConversations();
+  }, 'components.conversationItem.addToProjectFailed');
+
+  const handleStatusToggle = () => {
+    const newStatus = conversation.status === 'favorite' ? 'active' : 'favorite';
+    return runMutation(() => updateConversationStatus(conversation.conversation_id, newStatus), () => {
+      showNotification(t(newStatus === 'favorite' ? 'components.conversationItem.favorited' : 'components.conversationItem.unfavorited'), 'success');
+    }, 'components.conversationItem.operationFailed');
   };
 
-  const handleDelete = async (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    try {
-      if (conversation.status === 'deleted') {
-        setDeleteModalVisible(true);
-      } else {
-        await updateConversationStatus(conversation.conversation_id, 'deleted');
-        showNotification(t('components.conversationItem.movedToTrash'), 'success');
-      }
-    } catch (error) {
-      console.error('Delete failed:', error);
-      showNotification(t('components.conversationItem.deleteFailed'), 'error');
-    }
+  const handleDelete = () => {
+    if (conversation.status === 'deleted') { setDeleteModalVisible(true); return; }
+    return runMutation(() => updateConversationStatus(conversation.conversation_id, 'deleted'), () => {
+      onDeleted?.(conversation.conversation_id);
+      showNotification(t('components.conversationItem.movedToTrash'), 'success');
+    }, 'components.conversationItem.deleteFailed');
   };
 
-  const handleRestore = async (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    try {
-      await updateConversationStatus(conversation.conversation_id, 'active');
-      showNotification(t('components.conversationItem.restored'), 'success');
-    } catch (error) {
-      console.error('Restore failed:', error);
-      showNotification(t('components.conversationItem.restoreFailed'), 'error');
-    }
+  const handleRestore = () => runMutation(() => updateConversationStatus(conversation.conversation_id, 'active'), () => {
+    showNotification(t('components.conversationItem.restored'), 'success');
+  }, 'components.conversationItem.restoreFailed');
+
+  const handleEditTitle = () => {
+    const title = newTitle.trim();
+    if (!title) return;
+    return runMutation(async () => {
+      if (title !== conversation.title) await updateConversationTitle(conversation.conversation_id, title);
+    }, () => { if (mountedRef.current) setEditModalVisible(false); }, 'components.conversationItem.operationFailed');
   };
 
-  const handleEditTitle = async () => {
-    if (newTitle.trim() && newTitle !== conversation.title) {
-      await updateConversationTitle(conversation.conversation_id, newTitle.trim());
-    }
-    setEditModalVisible(false);
-  };
+  const handleEditTags = () => runMutation(() => updateConversationTags(conversation.conversation_id, newTags.split(',').map(tag => tag.trim()).filter(Boolean)), () => {
+    if (mountedRef.current) setTagsModalVisible(false);
+  }, 'components.conversationItem.operationFailed');
 
-  const handleEditTags = async () => {
-    const tags = newTags
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter(Boolean);
-    await updateConversationTags(conversation.conversation_id, tags);
-    setTagsModalVisible(false);
-  };
-
-  const handlePermanentDelete = async () => {
-    await deleteConversationPermanent(conversation.conversation_id);
-    setDeleteModalVisible(false);
+  const handlePermanentDelete = () => runMutation(() => deleteConversationPermanent(conversation.conversation_id), () => {
+    onDeleted?.(conversation.conversation_id);
+    if (mountedRef.current) setDeleteModalVisible(false);
     showNotification(t('components.conversationItem.permanentlyDeleted'), 'success');
-  };
+  }, 'components.conversationItem.deleteFailed');
 
-  const menuItems = [
+  const menuItems: MenuProps['items'] = [
     ...(conversation.status === 'deleted'
       ? [
           {
             key: 'restore',
             icon: <Check size={14} strokeWidth={1.5} />,
             label: t('components.conversationItem.restoreToNormal'),
-            onClick: (e: any) => {
+            onClick: (e: Parameters<NonNullable<MenuProps['onClick']>>[0]) => {
               e.domEvent?.stopPropagation();
               handleRestore();
             },
@@ -181,7 +168,7 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
       key: 'addToProject',
       icon: <FolderPlus size={14} strokeWidth={1.5} />,
       label: t('components.conversationItem.addToProject'),
-      onClick: (e: any) => {
+      onClick: (e: Parameters<NonNullable<MenuProps['onClick']>>[0]) => {
         e.domEvent?.stopPropagation();
         setProjectModalVisible(true);
       },
@@ -196,7 +183,7 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
         />
       ),
       label: conversation.status === 'favorite' ? t('components.conversationItem.unfavorite') : t('components.conversationItem.favorite'),
-      onClick: (e: any) => {
+      onClick: (e: Parameters<NonNullable<MenuProps['onClick']>>[0]) => {
         e.domEvent?.stopPropagation();
         handleStatusToggle();
       },
@@ -205,8 +192,9 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
       key: 'edit',
       icon: <Edit size={14} strokeWidth={1.5} />,
       label: t('components.conversationItem.editTitle'),
-      onClick: (e: any) => {
+      onClick: (e: Parameters<NonNullable<MenuProps['onClick']>>[0]) => {
         e.domEvent?.stopPropagation();
+        setNewTitle(conversation.title);
         setEditModalVisible(true);
       },
     },
@@ -214,8 +202,9 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
       key: 'tags',
       icon: <TagIcon size={14} strokeWidth={1.5} />,
       label: t('components.conversationItem.editTags'),
-      onClick: (e: any) => {
+      onClick: (e: Parameters<NonNullable<MenuProps['onClick']>>[0]) => {
         e.domEvent?.stopPropagation();
+        setNewTags(conversation.tags.join(', '));
         setTagsModalVisible(true);
       },
     },
@@ -223,13 +212,13 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
       key: 'delete',
       icon: <Trash2 size={14} strokeWidth={1.5} />,
       label: conversation.status === 'deleted' ? t('components.conversationItem.permanentDelete') : t('common.delete'),
-      onClick: (e: any) => {
+      onClick: (e: Parameters<NonNullable<MenuProps['onClick']>>[0]) => {
         e.domEvent?.stopPropagation();
         handleDelete();
       },
       danger: true,
     },
-  ];
+  ].map(item => ({ ...item, disabled: mutating }));
 
   const { locale: currentLocale } = useI18n();
   const dateLocale = currentLocale === 'zh' ? zhCN : enUS;
@@ -398,7 +387,7 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
           style={itemStyle}
           onClick={
             isBatchMode
-              ? () => onSelect?.(conversation.conversation_id, !isSelected)
+              ? () => { if (!selectionDisabled) onSelect?.(conversation.conversation_id, !isSelected); }
               : onClick
           }
           onMouseEnter={() => setIsHovered(true)}
@@ -422,6 +411,7 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
               >
                 <Checkbox
                   checked={isSelected}
+                  disabled={selectionDisabled}
                   onChange={(e) => {
                     e.stopPropagation();
                     onSelect?.(conversation.conversation_id, e.target.checked);
@@ -506,8 +496,11 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
       <Modal
         title={t('components.conversationItem.editTitleModal')}
         open={editModalVisible}
+        confirmLoading={mutating}
+        closable={!mutating}
+        maskClosable={!mutating}
         onOk={handleEditTitle}
-        onCancel={() => setEditModalVisible(false)}
+        onCancel={() => { if (!mutating) setEditModalVisible(false); }}
         okText={t('common.save')}
         cancelText={t('common.cancel')}
         okButtonProps={{
@@ -519,6 +512,7 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
           }
         }}
         cancelButtonProps={{
+          disabled: mutating,
           style: {
             borderRadius: '6px',
             border: '1px solid rgba(139, 115, 85, 0.2)',
@@ -534,6 +528,7 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
       >
         <Input
           value={newTitle}
+          disabled={mutating}
           onChange={(e) => setNewTitle(e.target.value)}
           placeholder={t('components.conversationItem.titlePlaceholder')}
           maxLength={100}
@@ -550,8 +545,11 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
       <Modal
         title={t('components.conversationItem.editTagsModal')}
         open={tagsModalVisible}
+        confirmLoading={mutating}
+        closable={!mutating}
+        maskClosable={!mutating}
         onOk={handleEditTags}
-        onCancel={() => setTagsModalVisible(false)}
+        onCancel={() => { if (!mutating) setTagsModalVisible(false); }}
         okText={t('common.save')}
         cancelText={t('common.cancel')}
         okButtonProps={{
@@ -563,6 +561,7 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
           }
         }}
         cancelButtonProps={{
+          disabled: mutating,
           style: {
             borderRadius: '6px',
             border: '1px solid rgba(139, 115, 85, 0.2)',
@@ -578,6 +577,7 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
       >
         <TextArea
           value={newTags}
+          disabled={mutating}
           onChange={(e) => setNewTags(e.target.value)}
           placeholder={t('components.conversationItem.tagsPlaceholder')}
           rows={3}
@@ -593,8 +593,11 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
       <Modal
         title={t('components.conversationItem.confirmPermanentDelete')}
         open={deleteModalVisible}
+        confirmLoading={mutating}
+        closable={!mutating}
+        maskClosable={!mutating}
         onOk={handlePermanentDelete}
-        onCancel={() => setDeleteModalVisible(false)}
+        onCancel={() => { if (!mutating) setDeleteModalVisible(false); }}
         okText={t('components.conversationItem.confirmDelete')}
         cancelText={t('common.cancel')}
         okButtonProps={{
@@ -607,6 +610,7 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
           }
         }}
         cancelButtonProps={{
+          disabled: mutating,
           style: {
             borderRadius: '6px',
             border: '1px solid rgba(139, 115, 85, 0.2)',

@@ -1,6 +1,5 @@
-// src/components/tour/useTour.tsx
-import { useEffect, useRef } from 'react';
-import { driver, DriveStep, Config } from 'driver.js';
+import { useCallback, useEffect, useRef } from 'react';
+import { driver, type DriveStep } from 'driver.js';
 import 'driver.js/dist/driver.css';
 import { useT } from '../../i18n/hooks';
 
@@ -10,7 +9,6 @@ export interface TourStep {
   contentKey: string;
   placement?: 'top' | 'bottom' | 'left' | 'right' | 'center';
 }
-
 interface UseTourOptions {
   steps: TourStep[];
   onComplete?: () => void;
@@ -20,17 +18,35 @@ interface UseTourOptions {
 export const useTour = ({ steps, onComplete, onSkip }: UseTourOptions) => {
   const t = useT();
   const driverRef = useRef<ReturnType<typeof driver> | null>(null);
+  const callbacks = useRef({ onComplete, onSkip });
+  callbacks.current = { onComplete, onSkip };
+  const startRef = useRef<() => void>(() => {});
+  const stopRef = useRef<() => void>(() => {});
 
   useEffect(() => {
-    // 自定义样式配置
-    const customConfig: Config = {
+    let reason: 'complete' | 'skip' | 'cleanup' | undefined;
+    let notified = false;
+    const finish = (nextReason: 'complete' | 'skip' | 'cleanup') => {
+      reason = nextReason;
+      instance.destroy();
+    };
+    const driveSteps: DriveStep[] = steps.map(step => ({
+      element: step.placement === 'center' ? undefined : step.element,
+      popover: {
+        title: t(step.titleKey),
+        description: t(step.contentKey),
+        side: step.placement === 'center' ? undefined : step.placement ?? 'bottom',
+        align: 'start',
+      },
+    }));
+    const instance = driver({
+      steps: driveSteps,
       showProgress: true,
       showButtons: ['next', 'previous', 'close'],
       progressText: '{{current}}/{{total}}',
-      nextBtnText: t('components.tour.nextBtn') || '下一步',
-      prevBtnText: t('components.tour.prevBtn') || '上一步',
-      doneBtnText: t('components.tour.doneBtn') || '完成',
-      closeBtnText: '×',
+      nextBtnText: t('components.tour.nextBtn'),
+      prevBtnText: t('components.tour.prevBtn'),
+      doneBtnText: t('components.tour.doneBtn'),
       animate: true,
       overlayOpacity: 0.7,
       smoothScroll: true,
@@ -39,70 +55,28 @@ export const useTour = ({ steps, onComplete, onSkip }: UseTourOptions) => {
       stagePadding: 8,
       stageRadius: 8,
       popoverClass: 'tour-popover',
+      onDestroyStarted: () => finish('skip'),
       onDestroyed: () => {
-        // 引导完成或被关闭时触发
-        if (onComplete) {
-          onComplete();
-        }
+        if (notified || reason === 'cleanup') return;
+        notified = true;
+        if (reason === 'complete') callbacks.current.onComplete?.();
+        else callbacks.current.onSkip?.();
       },
-      onDestroyStarted: () => {
-        // 判断是否是中途跳过
-        if (onSkip && driverRef.current) {
-          const currentIndex = driverRef.current.getActiveIndex();
-          if (currentIndex !== undefined && currentIndex < steps.length - 1) {
-            onSkip();
-          }
-        }
+      onNextClick: () => {
+        if (instance.getActiveIndex() === steps.length - 1) finish('complete');
+        else instance.moveNext();
       },
-      onNextClick: (element, step, options) => {
-        // 检查是否是最后一步
-        if (driverRef.current) {
-          const currentIndex = driverRef.current.getActiveIndex();
-          if (currentIndex !== undefined && currentIndex === steps.length - 1) {
-            // 最后一步，点击下一步/完成按钮时销毁driver
-            driverRef.current.destroy();
-            return;
-          }
-        }
-        // 不是最后一步，继续下一步
-        driverRef.current?.moveNext();
-      }
-    };
-
-    // 转换步骤为driver.js格式
-    const driveSteps: DriveStep[] = steps.map((step) => ({
-      element: step.element,
-      popover: {
-        title: t(step.titleKey),
-        description: t(step.contentKey),
-        side: step.placement || 'bottom',
-        align: 'start'
-      }
-    }));
-
-    driverRef.current = driver({
-      ...customConfig,
-      steps: driveSteps
     });
-
+    driverRef.current = instance;
+    stopRef.current = () => finish('skip');
+    startRef.current = () => { reason = undefined; notified = false; instance.drive(); };
     return () => {
-      if (driverRef.current) {
-        driverRef.current.destroy();
-      }
+      finish('cleanup');
+      if (driverRef.current === instance) driverRef.current = null;
     };
-  }, [steps, t, onComplete, onSkip]);
+  }, [steps, t]);
 
-  const startTour = () => {
-    if (driverRef.current) {
-      driverRef.current.drive();
-    }
-  };
-
-  const stopTour = () => {
-    if (driverRef.current) {
-      driverRef.current.destroy();
-    }
-  };
-
+  const startTour = useCallback(() => startRef.current(), []);
+  const stopTour = useCallback(() => stopRef.current(), []);
   return { startTour, stopTour };
 };

@@ -1,5 +1,6 @@
+import { isAxiosError } from 'axios';
 // src/pages/SharedConversation.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { message, Spin, Button, Typography, Empty, Drawer, List } from 'antd';
 import { FileOutlined, DownloadOutlined } from '@ant-design/icons';
@@ -24,59 +25,47 @@ const SharedConversation: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [drawerVisible, setDrawerVisible] = useState(false);
 
+  const scope = useRef(0);
+
   useEffect(() => {
+    const owner = ++scope.current;
+    const controller = new AbortController();
+    const current = () => owner === scope.current && !controller.signal.aborted;
+    setConversation(null);
+    setFiles([]);
+    setDrawerVisible(false);
+    setDownloadingFile(null);
+    setDownloadingAll(false);
+    setError(null);
     if (!shareId) {
       setError(t('pages.sharedConversation.invalidShareLink'));
       setLoading(false);
-      return;
+      return () => { scope.current += 1; controller.abort(); };
     }
-
-    loadSharedConversation();
-    loadSharedFiles();
-  }, [shareId]);
-
-  const loadSharedConversation = async () => {
-    if (!shareId) return;
-
-    try {
-      setLoading(true);
-      const data = await ConversationService.getSharedConversation(shareId);
-      setConversation(data);
-      setError(null);
-    } catch (error: any) {
-      console.error('加载分享对话失败:', error);
-      if (error.response?.status === 404) {
-        setError(t('pages.sharedConversation.notFound'));
-      } else {
-        setError(t('pages.sharedConversation.loadFailed'));
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadSharedFiles = async () => {
-    if (!shareId) return;
-
-    try {
-      setFilesLoading(true);
-      const fileList = await ConversationService.getSharedFiles(shareId);
-      setFiles(fileList);
-    } catch (error: any) {
-      console.error('加载文件列表失败:', error);
-      // 文件列表加载失败不影响主要内容显示
-    } finally {
-      setFilesLoading(false);
-    }
-  };
+    setLoading(true);
+    setFilesLoading(true);
+    void ConversationService.getSharedConversation(shareId, { signal: controller.signal })
+      .then(data => { if (current()) setConversation(data); })
+      .catch((error: unknown) => {
+        if (current()) setError(t(isAxiosError(error) && error.response?.status === 404
+          ? 'pages.sharedConversation.notFound' : 'pages.sharedConversation.loadFailed'));
+      }).finally(() => { if (current()) setLoading(false); });
+    void ConversationService.getSharedFiles(shareId, { signal: controller.signal })
+      .then(data => { if (current()) setFiles(data); })
+      .catch(() => { if (current()) setFiles([]); })
+      .finally(() => { if (current()) setFilesLoading(false); });
+    return () => { scope.current += 1; controller.abort(); };
+  }, [shareId, t]);
 
   const handleDownloadFile = async (filename: string) => {
     if (!shareId) return;
+    const owner = scope.current;
 
     try {
       setDownloadingFile(filename);
       const blob = await ConversationService.downloadSharedFile(shareId, filename);
       
+      if (owner !== scope.current) return;
       // 创建下载链接
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -88,21 +77,24 @@ const SharedConversation: React.FC = () => {
       window.URL.revokeObjectURL(url);
       
       message.success(t('pages.sharedConversation.downloadSuccess'));
-    } catch (error: any) {
+    } catch (error) {
+      if (owner !== scope.current) return;
       console.error('下载文件失败:', error);
       message.error(t('pages.sharedConversation.downloadFailed'));
     } finally {
-      setDownloadingFile(null);
+      if (owner === scope.current) setDownloadingFile(null);
     }
   };
 
   const handleDownloadAll = async () => {
     if (!shareId) return;
+    const owner = scope.current;
 
     try {
       setDownloadingAll(true);
       const blob = await ConversationService.downloadAllSharedFiles(shareId);
       
+      if (owner !== scope.current) return;
       // 创建下载链接
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -114,11 +106,12 @@ const SharedConversation: React.FC = () => {
       window.URL.revokeObjectURL(url);
       
       message.success(t('pages.sharedConversation.downloadAllSuccess'));
-    } catch (error: any) {
+    } catch (error) {
+      if (owner !== scope.current) return;
       console.error('批量下载失败:', error);
       message.error(t('pages.sharedConversation.downloadAllFailed'));
     } finally {
-      setDownloadingAll(false);
+      if (owner === scope.current) setDownloadingAll(false);
     }
   };
 

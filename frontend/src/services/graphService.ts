@@ -1,44 +1,20 @@
 // src/services/graphService.ts
 import api from './api';
+import { getSessionGeneration, isCurrentSession } from '../utils/authSession';
 import { 
   BackendGraphConfig, 
   GraphCardResponse, 
   MCPScriptResponse,
   ImportResult,
-  ExportResult,
+  GraphMutationResponse,
+  CreateVersionResponse,
+  GraphVersionListResponse,
+  GetVersionConfigResponse,
   GraphReadmeResponse,
   PromptTemplateResponse
 } from '../types/graph';
 
-// Clean special characters, comments, etc. from JSON
-function sanitizeForJson(obj: any): any {
-  if (obj === null || obj === undefined) {
-    return null;
-  }
-
-  if (typeof obj === 'string') {
-    return obj
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/.*/g, '')           
-      .replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, '');
-  }
-
-  if (typeof obj !== 'object') {
-    return obj;
-  }
-
-  if (Array.isArray(obj)) {
-    return obj.map(item => sanitizeForJson(item));
-  }
-
-  const result: any = {};
-  for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      result[key] = sanitizeForJson(obj[key]);
-    }
-  }
-  return result;
-}
+import { parseGraphConfig } from '../utils/graphEditorModel';
 
 // Get all graphs list
 export const getGraphs = async (): Promise<string[]> => {
@@ -47,114 +23,53 @@ export const getGraphs = async (): Promise<string[]> => {
 };
 
 // Get a specific graph
-export const getGraph = async (graphName: string): Promise<any> => {
-  const response = await api.get(`/graphs/${graphName}`);
+export const getGraph = async (graphName: string): Promise<BackendGraphConfig> => {
+  const response = await api.get(`/graphs/${encodeURIComponent(graphName)}`);
   return response.data;
 };
 
 // Create or update a graph
-export const createGraph = async (graph: BackendGraphConfig): Promise<any> => {
-  const cleanedGraph = sanitizeForJson(graph);
-
-  cleanedGraph.nodes.forEach((node: any) => {
-    if (!Array.isArray(node.input_nodes)) node.input_nodes = [];
-    if (!Array.isArray(node.output_nodes)) node.output_nodes = [];
-    if (!Array.isArray(node.mcp_servers)) node.mcp_servers = [];
-    if (!Array.isArray(node.system_tools)) node.system_tools = [];
-
-    const allNodeNames = cleanedGraph.nodes.map((n: any) => n.name);
-    node.input_nodes = node.input_nodes.filter(
-      (input: string) => input === "start" || allNodeNames.includes(input)
-    );
-    node.output_nodes = node.output_nodes.filter(
-      (output: string) => output === "end" || allNodeNames.includes(output)
-    );
-  });
-
-  const requestBody = {
-    name: cleanedGraph.name,
-    description: cleanedGraph.description || "",
-    end_template: cleanedGraph.end_template || "",
-    nodes: cleanedGraph.nodes.map((node: any) => {
-      const result: any = {
-        name: node.name,
-        description: node.description || "",
-        agent_name: node.agent_name || null,
-        is_subgraph: Boolean(node.is_subgraph),
-        mcp_servers: Array.isArray(node.mcp_servers) ? node.mcp_servers : [],
-        system_tools: Array.isArray(node.system_tools) ? node.system_tools : [],
-        system_prompt: typeof node.system_prompt === 'string' ? node.system_prompt : "",
-        user_prompt: typeof node.user_prompt === 'string' ? node.user_prompt : "",
-        max_iterations: node.max_iterations || null,
-        input_nodes: Array.isArray(node.input_nodes) ? node.input_nodes : [],
-        output_nodes: Array.isArray(node.output_nodes) ? node.output_nodes : [],
-        handoffs: node.handoffs || null,
-        output_enabled: node.output_enabled !== undefined ? Boolean(node.output_enabled) : true,
-        position: node.position || { x: 0, y: 0 },
-        level: node.level || null
-      };
-
-      if (node.is_subgraph) {
-        result.subgraph_name = node.subgraph_name || "";
-      } else {
-        result.model_name = node.model_name || "";
-      }
-
-      return result;
-    })
-  };
-
-  try {
-    const cleanJson = JSON.stringify(requestBody);
-    const finalBody = JSON.parse(cleanJson);
-
-    console.log('Data structure submitted to API:', finalBody);
-
-    const response = await api.post('/graphs', finalBody);
-    return response.data;
-  } catch (error: any) {
-    console.error('Error submitting to API:', error);
-    console.log('Submitted data:', JSON.stringify(requestBody, null, 2));
-    
-    // Extract and log the detailed error message from the backend
-    const errorDetail = error?.response?.data?.detail || error?.message || 'Unknown error';
-    console.error('Backend error detail:', errorDetail);
-    
-    // Re-throw with more detailed error message
-    const enhancedError = new Error(errorDetail);
-    (enhancedError as any).originalError = error;
-    throw enhancedError;
-  }
+export const createGraph = async (graph: BackendGraphConfig): Promise<GraphMutationResponse> => {
+  const requestBody = parseGraphConfig(graph);
+  // 编辑器空值表示继承 Agent 上限；省略字段会触发后端默认值 50。
+  requestBody.nodes = requestBody.nodes.map(node => ({
+    ...node,
+    max_iterations: node.max_iterations ?? null,
+  }));
+  const response = await api.post<GraphMutationResponse>('/graphs', requestBody);
+  return response.data;
 };
 
 // Delete a graph
-export const deleteGraph = async (graphName: string): Promise<any> => {
-  const response = await api.delete(`/graphs/${graphName}`);
+export const deleteGraph = async (graphName: string): Promise<GraphMutationResponse> => {
+  const response = await api.delete(`/graphs/${encodeURIComponent(graphName)}`);
   return response.data;
 };
 
 // Rename a graph
-export const renameGraph = async (oldName: string, newName: string): Promise<any> => {
-  const response = await api.put(`/graphs/${oldName}/rename/${newName}`);
+export const renameGraph = async (oldName: string, newName: string): Promise<GraphMutationResponse> => {
+  const response = await api.put(`/graphs/${encodeURIComponent(oldName)}/rename/${encodeURIComponent(newName)}`);
   return response.data;
 };
 
 
 // Get graph card
 export const getGraphCard = async (graphName: string): Promise<GraphCardResponse> => {
-  const response = await api.get(`/graphs/${graphName}/card`);
+  const response = await api.get(`/graphs/${encodeURIComponent(graphName)}/card`);
   return response.data;
 };
 
 // Generate MCP script
 export const generateMCPScript = async (graphName: string): Promise<MCPScriptResponse> => {
-  const response = await api.get(`/graphs/${graphName}/generate_mcp`);
+  const response = await api.get(`/graphs/${encodeURIComponent(graphName)}/generate_mcp`);
   return response.data;
 };
 
 // Download MCP script as file
 export const downloadMCPScript = async (graphName: string): Promise<void> => {
+  const generation = getSessionGeneration();
   const response = await generateMCPScript(graphName);
+  if (!isCurrentSession(generation)) throw new DOMException('Session changed', 'AbortError');
   
   if (response.error) {
     throw new Error(response.error);
@@ -202,9 +117,11 @@ export const importGraphFromFile = async (file: File): Promise<ImportResult> => 
 
 // Export graph to ZIP package
 export const exportGraph = async (graphName: string): Promise<void> => {
-  const response = await api.get(`/graphs/${graphName}/export`, {
+  const generation = getSessionGeneration();
+  const response = await api.get(`/graphs/${encodeURIComponent(graphName)}/export`, {
     responseType: 'blob'
   });
+  if (!isCurrentSession(generation)) throw new DOMException('Session changed', 'AbortError');
   
   // 创建 Blob 并下载
   const blob = new Blob([response.data], { type: 'application/zip' });
@@ -253,7 +170,7 @@ export const getPromptTemplate = async (request?: { mcp_servers?: string[], grap
 
 // Get graph README
 export const getGraphReadme = async (graphName: string): Promise<GraphReadmeResponse> => {
-  const response = await api.get(`/graphs/${graphName}/readme`);
+  const response = await api.get(`/graphs/${encodeURIComponent(graphName)}/readme`);
   return response.data;
 };
 
@@ -265,8 +182,8 @@ export const getGraphReadme = async (graphName: string): Promise<GraphReadmeResp
 export const createGraphVersion = async (
   graphName: string,
   commitMessage: string
-): Promise<any> => {
-  const response = await api.post(`/graphs/${graphName}/create-version`, {
+): Promise<CreateVersionResponse> => {
+  const response = await api.post(`/graphs/${encodeURIComponent(graphName)}/create-version`, {
     commit_message: commitMessage
   });
   return response.data;
@@ -275,8 +192,8 @@ export const createGraphVersion = async (
 /**
  * 获取图的版本列表
  */
-export const getGraphVersions = async (graphName: string): Promise<any> => {
-  const response = await api.get(`/graphs/${graphName}/versions`);
+export const getGraphVersions = async (graphName: string): Promise<GraphVersionListResponse> => {
+  const response = await api.get(`/graphs/${encodeURIComponent(graphName)}/versions`);
   return response.data;
 };
 
@@ -286,8 +203,8 @@ export const getGraphVersions = async (graphName: string): Promise<any> => {
 export const getGraphVersion = async (
   graphName: string,
   versionId: string
-): Promise<any> => {
-  const response = await api.get(`/graphs/${graphName}/versions/${versionId}`);
+): Promise<GetVersionConfigResponse> => {
+  const response = await api.get(`/graphs/${encodeURIComponent(graphName)}/versions/${encodeURIComponent(versionId)}`);
   return response.data;
 };
 
@@ -297,7 +214,7 @@ export const getGraphVersion = async (
 export const deleteGraphVersion = async (
   graphName: string,
   versionId: string
-): Promise<any> => {
-  const response = await api.delete(`/graphs/${graphName}/versions/${versionId}`);
+): Promise<GraphMutationResponse> => {
+  const response = await api.delete(`/graphs/${encodeURIComponent(graphName)}/versions/${encodeURIComponent(versionId)}`);
   return response.data;
 };

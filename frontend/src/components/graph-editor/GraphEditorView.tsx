@@ -1,5 +1,5 @@
 // 图编辑器视图组件
-import React, { useState, useRef } from 'react';
+import React from 'react';
 import { Card, Button, Tooltip, Space, Typography, Drawer, message } from 'antd';
 import { ReactFlowProvider } from 'reactflow';
 import {
@@ -15,12 +15,13 @@ import {
   Maximize2
 } from 'lucide-react';
 import GraphCanvas from './GraphCanvas';
-import GraphJsonEditor, { GraphJsonEditorHandle } from './GraphJsonEditor';
+import GraphJsonEditor from './GraphJsonEditor';
 import NodePropertiesPanel from './NodePropertiesPanel';
 import { useGraphEditorStore } from '../../store/graphEditorStore';
 import { useT } from '../../i18n/hooks';
 import { buttonStyles } from '../../utils/graphEditorConstants';
-import { BackendGraphConfig } from '../../types/graph';
+import { toBackendConfig } from '../../utils/graphEditorModel';
+import { getErrorMessage } from '../../utils/errors';
 
 const { Text } = Typography;
 
@@ -39,7 +40,6 @@ interface GraphEditorViewProps {
   onCloseNodePanel: () => void;
 }
 
-type EditorViewMode = 'canvas' | 'json';
 
 /**
  * 图编辑器视图
@@ -59,113 +59,18 @@ const GraphEditorView: React.FC<GraphEditorViewProps> = ({
   onCloseNodePanel
 }) => {
   const t = useT();
-  const [viewMode, setViewMode] = useState<EditorViewMode>('canvas');
-  const jsonEditorRef = useRef<GraphJsonEditorHandle>(null);
-
-  const { currentGraph, updateGraphFromJson } = useGraphEditorStore();
-
-  // 转换当前图为后端格式（供JSON编辑器使用）
-  const getBackendConfig = (): BackendGraphConfig => {
-    if (!currentGraph) {
-      return {
-        name: graphName,
-        description: graphDescription || '',
-        nodes: []
-      };
-    }
-
-    return {
-      name: currentGraph.name,
-      description: currentGraph.description || '',
-      nodes: currentGraph.nodes.map(node => {
-        const result: any = {
-          name: node.name,
-          description: node.description || '',
-          agent_name: node.agent_name || null,
-          is_subgraph: node.is_subgraph,
-          mcp_servers: node.mcp_servers || [],
-          system_tools: node.system_tools || [],
-          system_prompt: node.system_prompt || '',
-          user_prompt: node.user_prompt || '',
-          max_iterations: node.max_iterations || undefined,
-          input_nodes: node.input_nodes || [],
-          output_nodes: node.output_nodes || [],
-          handoffs: node.handoffs,
-          output_enabled: node.output_enabled ?? true,
-          position: node.position || { x: 100, y: 100 },
-          level: node.level
-        };
-
-        if (node.is_subgraph) {
-          result.subgraph_name = node.subgraph_name || '';
-        } else {
-          result.model_name = node.model_name || '';
-        }
-
-        return result;
-      }),
-      end_template: currentGraph.end_template
-    };
-  };
-
-  // 处理视图切换
+  const currentGraph = useGraphEditorStore(state => state.currentGraph);
+  const jsonDraft = useGraphEditorStore(state => state.jsonDraft);
+  const saving = useGraphEditorStore(state => state.saving);
+  const beginJsonEditing = useGraphEditorStore(state => state.beginJsonEditing);
+  const endJsonEditing = useGraphEditorStore(state => state.endJsonEditing);
+  const setJsonDraft = useGraphEditorStore(state => state.setJsonDraft);
+  const viewMode = jsonDraft === null ? 'canvas' : 'json';
   const handleViewModeToggle = () => {
-    if (viewMode === 'json') {
-      // JSON → 画布：需要验证并应用
-      if (!jsonEditorRef.current) return;
-
-      const result = jsonEditorRef.current.validateAndGetConfig();
-
-      if (!result.valid) {
-        message.error({
-          content: `Cannot switch to canvas view: ${result.error}`,
-          duration: 4
-        });
-        return; // 阻止切换
-      }
-
-      // 应用到 currentGraph
-      if (result.config) {
-        updateGraphFromJson(result.config);
-      }
-
-      setViewMode('canvas');
-      message.success('Switched to canvas view');
-    } else {
-      // 画布 → JSON：直接切换
-      setViewMode('json');
-    }
+    try { if (viewMode === 'json') endJsonEditing(); else beginJsonEditing(); }
+    catch (error) { message.error(getErrorMessage(error)); }
   };
-
-  // 处理保存
-  const handleSave = async () => {
-    if (viewMode === 'json') {
-      // JSON视图下保存：先验证并应用
-      if (!jsonEditorRef.current) return;
-
-      const result = jsonEditorRef.current.validateAndGetConfig();
-
-      if (!result.valid) {
-        message.error({
-          content: `Cannot save: ${result.error}`,
-          duration: 4
-        });
-        return;
-      }
-
-      // 应用到 currentGraph
-      if (result.config) {
-        updateGraphFromJson(result.config);
-      }
-
-      // 延迟一下让状态更新
-      await new Promise(resolve => setTimeout(resolve, 100));
-      await onSave();
-    } else {
-      // 画布视图下保存：直接保存
-      await onSave();
-    }
-  };
+  const handleSave = () => { void onSave().catch(() => {}); };
 
   return (
     <div style={{ background: '#faf8f5', minHeight: '100vh' }}>
@@ -287,6 +192,7 @@ const GraphEditorView: React.FC<GraphEditorViewProps> = ({
                 icon={<Save size={16} strokeWidth={1.5} />}
                 onClick={handleSave}
                 disabled={!hasUnsavedChanges}
+                loading={saving}
                 style={hasUnsavedChanges ? {
                   ...buttonStyles.primary,
                   padding: '4px 16px',
@@ -305,7 +211,7 @@ const GraphEditorView: React.FC<GraphEditorViewProps> = ({
       {/* 编辑区域 */}
       <div style={{ padding: '24px 48px' }}>
         <Card
-          bodyStyle={{ padding: 0, height: '100%' }}
+          styles={{ body: { padding: 0, height: '100%' } }}
           className="overflow-hidden"
           style={{
             height: 'calc(100vh - 180px)',
@@ -321,8 +227,9 @@ const GraphEditorView: React.FC<GraphEditorViewProps> = ({
             </ReactFlowProvider>
           ) : (
             <GraphJsonEditor
-              ref={jsonEditorRef}
-              graphConfig={getBackendConfig()}
+              graphConfig={currentGraph ? toBackendConfig(currentGraph) : { name: graphName, description: graphDescription ?? '', nodes: [] }}
+              value={jsonDraft ?? ''}
+              onChange={setJsonDraft}
             />
           )}
         </Card>

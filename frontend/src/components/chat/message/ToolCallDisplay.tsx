@@ -3,27 +3,14 @@ import React, { useState, useEffect } from 'react';
 import { Typography, Tag } from 'antd';
 import { ToolOutlined, LoadingOutlined } from '@ant-design/icons';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import CodeHighlighter from '../../common/CodeHighlighter';
+import type { ToolCall } from '../../../types/conversation';
 import { useT } from '../../../i18n/hooks';
 
 const { Text } = Typography;
 
-// 自定义语法高亮主题
-const customCodeStyle = {
-  ...oneLight,
-  'code[class*="language-"]': {
-    ...oneLight['code[class*="language-"]'],
-    background: 'transparent'
-  },
-  'pre[class*="language-"]': {
-    ...oneLight['pre[class*="language-"]'],
-    background: 'transparent'
-  }
-};
-
 interface ToolCallDisplayProps {
-  toolCall: any;
+  toolCall: ToolCall;
   result?: string;
   conversationId?: string;
   isStreaming?: boolean;
@@ -36,7 +23,6 @@ interface ToolCallDisplayProps {
 const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({ 
   toolCall, 
   result, 
-  conversationId, 
   isStreaming = false 
 }) => {
   const t = useT();
@@ -112,19 +98,7 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({
               {t('pages.chatSystem.messageDisplay.parameters')}
             </Text>
             <div style={{ marginTop: '8px' }}>
-              <SyntaxHighlighter
-                language="json"
-                style={customCodeStyle}
-                customStyle={{
-                  background: 'rgba(245, 243, 240, 0.6)',
-                  padding: '10px 12px',
-                  fontSize: '12px',
-                  borderRadius: '4px',
-                  border: '1px solid rgba(139, 115, 85, 0.1)'
-                }}
-              >
-                {toolCall.function?.arguments || '{}'}
-              </SyntaxHighlighter>
+              <CodeHighlighter language="json" code={toolCall.function.arguments || '{}'} />
             </div>
           </div>
 
@@ -152,4 +126,4 @@ const ToolCallDisplay: React.FC<ToolCallDisplayProps> = ({
   );
 };
 
-export default ToolCallDisplay;
+export default React.memo(ToolCallDisplay);

@@ -1,3 +1,4 @@
+import type { JsonObject, JsonValue } from './json';
 // src/types/mcp.ts
 export interface MCPServerConfig {
   autoApprove: string[];
@@ -14,7 +15,7 @@ export interface MCPServerConfig {
   provider_user_id?: string;     // 提供者用户ID
   created_at?: string;            // 创建时间
 
-  [key: string]: any;
+  [key: string]: JsonValue | undefined;
 }
 
 export interface MCPConfig {
@@ -41,6 +42,31 @@ export interface MCPTools {
   [serverName: string]: Array<{
     name: string;
     description: string;
-    input_schema: any;
+    input_schema: JsonObject;
   }>;
+}
+export interface MCPToolRegistration {
+  folder_name: string;
+  script_files: Record<string, string>;
+  readme: string;
+  dependencies: string;
+  port?: number;
+}
+export interface MCPToolTestResult {
+  status: 'success' | 'error';
+  params: JsonObject;
+  server_name: string;
+  tool_name: string;
+  result?: JsonValue;
+  error?: string;
+  execution_time?: number;
+}
+export interface MCPConfigUpdateResult {
+  status: { version?: number; message?: string; warning?: string; error?: string };
+}
+export interface MCPServerMutationResult {
+  status: string;
+  message?: string;
+  error?: string;
+  new_version?: number;
 }

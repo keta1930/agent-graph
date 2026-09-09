@@ -1,9 +1,11 @@
 // src/components/chat/sidebar/ConversationSidebar.tsx
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Input, Button, Empty, Spin, Tooltip } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { Search, Plus, Home, Clock, ChevronLeft, CheckSquare } from 'lucide-react';
 import { useConversationStore } from '../../../store/conversationStore';
+import { getSessionGeneration, isCurrentSession } from '../../../utils/authSession';
+import { getErrorMessage } from '../../../utils/errors';
 import { useT } from '../../../i18n/hooks';
 import UserMenu from '../../common/UserMenu';
 import CollapsedSidebar from './CollapsedSidebar';
@@ -25,57 +27,67 @@ const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
 }) => {
   const navigate = useNavigate();
   const t = useT();
-  const [scrollPosition, setScrollPosition] = useState(0);
+  const scrollPosition = useRef(0);
+  const deletingRef = useRef(false);
+  const [deleting, setDeleting] = useState(false);
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedConversations, setSelectedConversations] = useState<
     Set<string>
   >(new Set());
   const listRef = useRef<HTMLDivElement>(null);
+  const currentSelectionRef = useRef({ activeConversationId, onNewConversation });
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    currentSelectionRef.current = { activeConversationId, onNewConversation };
+  }, [activeConversationId, onNewConversation]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
-  const {
-    conversations,
-    loading,
-    searchQuery,
-    sidebarCollapsed,
-    setSearchQuery,
-    toggleSidebar,
-    loadConversations,
-    silentUpdateConversations,
-    showNotification,
-    batchDeleteConversations,
-  } = useConversationStore();
+  const handleConversationDeleted = useCallback((conversationId: string) => {
+    const current = currentSelectionRef.current;
+    if (mountedRef.current && current.activeConversationId === conversationId) current.onNewConversation?.();
+  }, []);
 
-  const saveScrollPosition = () => {
-    if (listRef.current) {
-      setScrollPosition(listRef.current.scrollTop);
-    }
-  };
-
-  const restoreScrollPosition = () => {
-    if (listRef.current && scrollPosition > 0) {
-      requestAnimationFrame(() => {
-        if (listRef.current) {
-          listRef.current.scrollTop = scrollPosition;
-        }
-      });
-    }
-  };
+  const conversations = useConversationStore(state => state.conversations);
+  const loading = useConversationStore(state => state.loading);
+  const searchQuery = useConversationStore(state => state.searchQuery);
+  const sidebarCollapsed = useConversationStore(state => state.sidebarCollapsed);
+  const setSearchQuery = useConversationStore(state => state.setSearchQuery);
+  const toggleSidebar = useConversationStore(state => state.toggleSidebar);
+  const loadConversations = useConversationStore(state => state.loadConversations);
+  const silentUpdateConversations = useConversationStore(state => state.silentUpdateConversations);
+  const showNotification = useConversationStore(state => state.showNotification);
+  const batchDeleteConversations = useConversationStore(state => state.batchDeleteConversations);
 
   useEffect(() => {
-    loadConversations();
-
-    const interval = setInterval(() => {
-      saveScrollPosition();
-      silentUpdateConversations();
-    }, 15000);
-
-    return () => clearInterval(interval);
+    void loadConversations();
+    const refresh = () => {
+      scrollPosition.current = listRef.current?.scrollTop ?? 0;
+      void silentUpdateConversations();
+    };
+    let visible = !document.hidden;
+    let interval = visible ? setInterval(refresh, 15000) : undefined;
+    const handleVisibility = () => {
+      const nextVisible = !document.hidden;
+      if (visible === nextVisible) return;
+      visible = nextVisible;
+      clearInterval(interval);
+      interval = undefined;
+      if (visible) {
+        // 恢复时立即刷新，同一列表正在读取时由 store 合并请求。
+        refresh();
+        interval = setInterval(refresh, 15000);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', handleVisibility); };
   }, [loadConversations, silentUpdateConversations]);
-
   useEffect(() => {
-    if (!loading && conversations.length > 0) {
-      restoreScrollPosition();
-    }
+    if (loading || !conversations.length) return;
+    const frame = requestAnimationFrame(() => { if (listRef.current) listRef.current.scrollTop = scrollPosition.current; });
+    return () => cancelAnimationFrame(frame);
   }, [conversations, loading]);
 
   const visibleConversations = useMemo(() => {
@@ -97,23 +109,27 @@ const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
     });
   }, [conversations, searchQuery]);
 
+  const selectedIds = useMemo(() => new Set(conversations.filter(item => selectedConversations.has(item.conversation_id)).map(item => item.conversation_id)), [conversations, selectedConversations]);
+  const allVisibleSelected = visibleConversations.length > 0 && visibleConversations.every(item => selectedIds.has(item.conversation_id));
+
   const handleBatchModeToggle = () => {
+    if (deletingRef.current) return;
     setIsBatchMode(!isBatchMode);
     setSelectedConversations(new Set());
   };
 
-  const handleConversationSelect = (
+  const handleConversationSelect = useCallback((
     conversationId: string,
     selected: boolean
   ) => {
-    const newSelected = new Set(selectedConversations);
-    if (selected) {
-      newSelected.add(conversationId);
-    } else {
-      newSelected.delete(conversationId);
-    }
-    setSelectedConversations(newSelected);
-  };
+    if (deletingRef.current) return;
+    setSelectedConversations(previous => {
+      const next = new Set(previous);
+      if (selected) next.add(conversationId);
+      else next.delete(conversationId);
+      return next;
+    });
+  }, []);
 
   const handleSelectAll = () => {
     const allIds = new Set(visibleConversations.map((conv) => conv.conversation_id));
@@ -125,43 +141,49 @@ const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
   };
 
   const handleBatchDelete = async () => {
-    if (selectedConversations.size === 0) return;
-
+    if (!selectedIds.size || deletingRef.current) return;
+    deletingRef.current = true;
+    setDeleting(true);
+    const session = getSessionGeneration();
+    const selectedList = conversations.filter(item => selectedIds.has(item.conversation_id));
+    const groups = [
+      { permanent: false, ids: selectedList.filter(item => item.status !== 'deleted').map(item => item.conversation_id) },
+      { permanent: true, ids: selectedList.filter(item => item.status === 'deleted').map(item => item.conversation_id) }
+    ];
+    const succeeded = new Set<string>();
+    const summaries: string[] = [];
+    let failed = 0;
     try {
-      const selectedList = conversations.filter((conv) =>
-        selectedConversations.has(conv.conversation_id)
-      );
-      const toPermanent = selectedList
-        .filter((conv) => conv.status === 'deleted')
-        .map((conv) => conv.conversation_id);
-      const toSoft = selectedList
-        .filter((conv) => conv.status !== 'deleted')
-        .map((conv) => conv.conversation_id);
-
-      if (toSoft.length > 0) {
-        const res = await batchDeleteConversations(toSoft, false);
-        if (res.success > 0)
-          showNotification(
-            t('components.conversationSidebar.movedToTrash', { count: res.success }),
-            'success'
-          );
-        if (res.failed > 0)
-          showNotification(t('components.conversationSidebar.softDeleteFailed', { count: res.failed }), 'error');
+      for (const group of groups) {
+        if (!group.ids.length) continue;
+        try {
+          const result = await batchDeleteConversations(group.ids, group.permanent, { refresh: false });
+          if (!isCurrentSession(session) || !mountedRef.current) return;
+          result.succeededIds.forEach(id => succeeded.add(id));
+          failed += result.failed.length;
+          if (result.succeededIds.length) summaries.push(t(group.permanent ? 'components.conversationSidebar.permanentlyDeleted' : 'components.conversationSidebar.movedToTrash', { count: result.succeededIds.length }));
+          if (result.failed.length) summaries.push(t(group.permanent ? 'components.conversationSidebar.permanentDeleteFailed' : 'components.conversationSidebar.softDeleteFailed', { count: result.failed.length }));
+        } catch {
+          if (!isCurrentSession(session) || !mountedRef.current) return;
+          failed += group.ids.length;
+          summaries.push(t(group.permanent ? 'components.conversationSidebar.permanentDeleteFailed' : 'components.conversationSidebar.softDeleteFailed', { count: group.ids.length }));
+        }
       }
-
-      if (toPermanent.length > 0) {
-        const res2 = await batchDeleteConversations(toPermanent, true);
-        if (res2.success > 0)
-          showNotification(t('components.conversationSidebar.permanentlyDeleted', { count: res2.success }), 'success');
-        if (res2.failed > 0)
-          showNotification(t('components.conversationSidebar.permanentDeleteFailed', { count: res2.failed }), 'error');
+      if (!isCurrentSession(session) || !mountedRef.current) return;
+      setSelectedConversations(previous => new Set([...previous].filter(id => !succeeded.has(id))));
+      if (!failed) setIsBatchMode(false);
+      succeeded.forEach(handleConversationDeleted);
+      if (succeeded.size) {
+        try { await silentUpdateConversations(); }
+        catch (error) {
+          failed += 1;
+          summaries.push(getErrorMessage(error, t('components.conversationSidebar.batchDeleteFailed')));
+        }
       }
-
-      setSelectedConversations(new Set());
-      setIsBatchMode(false);
-    } catch (error) {
-      console.error('Batch delete failed:', error);
-      showNotification(t('components.conversationSidebar.batchDeleteFailed'), 'error');
+      if (isCurrentSession(session) && mountedRef.current && summaries.length) showNotification(summaries.join(' · '), failed ? 'error' : 'success');
+    } finally {
+      deletingRef.current = false;
+      if (isCurrentSession(session) && mountedRef.current) setDeleting(false);
     }
   };
 
@@ -273,6 +295,7 @@ const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
               type="text"
               icon={<CheckSquare size={16} strokeWidth={1.5} />}
               onClick={handleBatchModeToggle}
+              disabled={deleting}
               style={{
                 height: '36px',
                 width: '36px',
@@ -375,16 +398,14 @@ const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
               fontWeight: 400,
             }}
           >
-            {t('components.conversationSidebar.selectedCount', { count: selectedConversations.size })}
+            {t('components.conversationSidebar.selectedCount', { count: selectedIds.size })}
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <Button
               type="text"
               size="small"
               onClick={handleSelectAll}
-              disabled={
-                selectedConversations.size === visibleConversations.length
-              }
+              disabled={deleting || visibleConversations.length === 0 || allVisibleSelected}
               style={{
                 fontSize: '12px',
                 height: '24px',
@@ -399,7 +420,7 @@ const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
               type="text"
               size="small"
               onClick={handleDeselectAll}
-              disabled={selectedConversations.size === 0}
+              disabled={deleting || selectedIds.size === 0}
               style={{
                 fontSize: '12px',
                 height: '24px',
@@ -421,7 +442,8 @@ const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
               type="text"
               size="small"
               onClick={handleBatchDelete}
-              disabled={selectedConversations.size === 0}
+              loading={deleting}
+              disabled={selectedIds.size === 0}
               style={{
                 fontSize: '12px',
                 height: '24px',
@@ -439,7 +461,7 @@ const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
       {/* 对话列表 */}
       <div
         ref={listRef}
-        onScroll={saveScrollPosition}
+        onScroll={event => { scrollPosition.current = event.currentTarget.scrollTop; }}
         className="conversation-list-scrollbar"
         style={{
           flex: 1,
@@ -477,8 +499,10 @@ const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
               isActive={conversation.conversation_id === activeConversationId}
               onClick={() => onConversationSelect(conversation.conversation_id)}
               isBatchMode={isBatchMode}
-              isSelected={selectedConversations.has(conversation.conversation_id)}
+              isSelected={selectedIds.has(conversation.conversation_id)}
               onSelect={handleConversationSelect}
+              selectionDisabled={deleting}
+              onDeleted={handleConversationDeleted}
             />
           ))
         )}

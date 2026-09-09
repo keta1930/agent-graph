@@ -1,10 +1,10 @@
 import enTranslations from './en.json';
 import zhTranslations from './zh.json';
-import { Locale, TranslationResource } from '../types';
+import type { Locale, TranslationResource, TranslationTree } from '../types';
 
 const translations: Record<Locale, TranslationResource> = {
-  en: enTranslations as TranslationResource,
-  zh: zhTranslations as TranslationResource,
+  en: enTranslations,
+  zh: zhTranslations,
 };
 
 /**
@@ -15,14 +15,14 @@ const translations: Record<Locale, TranslationResource> = {
  */
 export const getTranslation = (locale: Locale, key: string): string => {
   const keys = key.split('.');
-  let value: any = translations[locale];
+  let value: string | TranslationTree = translations[locale];
   
   for (const k of keys) {
-    if (value && typeof value === 'object' && k in value) {
+    if (typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, k)) {
       value = value[k];
     } else {
       // 开发环境警告
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.warn(`Translation key not found: ${key} for locale: ${locale}`);
       }
       return key; // 返回键本身作为后备

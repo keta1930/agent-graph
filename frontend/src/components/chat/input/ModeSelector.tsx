@@ -6,7 +6,7 @@ import { useConversationStore } from '../../../store/conversationStore';
 import { useModelStore } from '../../../store/modelStore';
 import { useGraphEditorStore } from '../../../store/graphEditorStore';
 import { useMCPStore } from '../../../store/mcpStore';
-import { ConversationMode } from '../../../types/conversation';
+import { ConversationMode, ChatSubmitOptions } from '../../../types/conversation';
 import SystemPromptToggle from '../controls/SystemPromptToggle';
 import AgentPicker from '../controls/AgentPicker';
 import MCPToolSelector from '../controls/MCPToolSelector';
@@ -20,8 +20,9 @@ import ProjectSelector from '../controls/ProjectSelector';
 import { useT } from '../../../i18n/hooks';
 
 interface ModeSelectorProps {
+  disabled?: boolean;
   onModeSelect: (mode: ConversationMode) => void;
-  onStartConversation: (inputText: string, options?: any) => void;
+  onStartConversation: (inputText: string, options?: ChatSubmitOptions) => Promise<void> | void;
 }
 
 /**
@@ -32,13 +33,25 @@ interface ModeSelectorProps {
  */
 const ModeSelector: React.FC<ModeSelectorProps> = ({
   onModeSelect,
-  onStartConversation
+  onStartConversation,
+  disabled = false
 }) => {
   const t = useT();
-  const { currentMode, setCurrentMode } = useConversationStore();
-  const { models: availableModels, fetchModels } = useModelStore();
-  const { graphs: availableGraphs, fetchGraphs } = useGraphEditorStore();
-  const { config: mcpConfig, status: mcpStatus, fetchConfig: fetchMCPConfig, fetchStatus: fetchMCPStatus } = useMCPStore();
+  const submittingRef = React.useRef(false);
+  const composingRef = React.useRef(false);
+  const mountedRef = React.useRef(true);
+  const [submitting, setSubmitting] = React.useState(false);
+  React.useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  const currentMode = useConversationStore(state => state.currentMode);
+  const setCurrentMode = useConversationStore(state => state.setCurrentMode);
+  const availableModels = useModelStore(state => state.models);
+  const fetchModels = useModelStore(state => state.fetchModels);
+  const availableGraphs = useGraphEditorStore(state => state.graphs);
+  const fetchGraphs = useGraphEditorStore(state => state.fetchGraphs);
+  const mcpConfig = useMCPStore(state => state.config);
+  const mcpStatus = useMCPStore(state => state.status);
+  const fetchMCPConfig = useMCPStore(state => state.fetchConfig);
+  const fetchMCPStatus = useMCPStore(state => state.fetchStatus);
 
   const [inputValue, setInputValue] = React.useState('');
   const [systemPrompt, setSystemPrompt] = React.useState('');
@@ -76,14 +89,11 @@ const ModeSelector: React.FC<ModeSelectorProps> = ({
   }, [fetchModels, fetchGraphs, fetchMCPConfig, fetchMCPStatus]);
 
   React.useEffect(() => {
-    const initialStates: Record<string, boolean> = {};
-    availableMCPServers.forEach(serverName => {
-      initialStates[serverName] = false;
-    });
-    setSelectedMCPServers(initialStates);
+    setSelectedMCPServers(previous => Object.fromEntries(Object.entries(previous).filter(([name]) => availableMCPServers.includes(name))));
   }, [availableMCPServers]);
 
   const handleModeChange = (mode: ConversationMode) => {
+    if (disabled || submittingRef.current) return;
     setCurrentMode(mode);
     onModeSelect(mode);
     setSelectedModel('');
@@ -115,11 +125,11 @@ const ModeSelector: React.FC<ModeSelectorProps> = ({
     }
   };
 
-  const handleStart = () => {
+  const handleStart = async () => {
     const content = inputValue.trim();
-    if (!content) return;
+    if (!canStart() || submittingRef.current || composingRef.current) return;
 
-    const options: any = {
+    const options: ChatSubmitOptions = {
       mode: currentMode
     };
 
@@ -137,7 +147,7 @@ const ModeSelector: React.FC<ModeSelectorProps> = ({
       }
 
       const enabledMCPServers = Object.entries(selectedMCPServers)
-        .filter(([_, enabled]) => enabled)
+        .filter(([, enabled]) => enabled)
         .map(([serverName]) => serverName);
       if (enabledMCPServers.length > 0) {
         options.mcp_servers = enabledMCPServers;
@@ -162,14 +172,21 @@ const ModeSelector: React.FC<ModeSelectorProps> = ({
       options.graph_name = selectedGraph;
     }
 
-    onStartConversation(content, options);
-    setSelectedFiles([]);
-    setClearFilesTrigger(prev => prev + 1);
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      await onStartConversation(content, options);
+      if (!mountedRef.current) return;
+      setInputValue('');
+      setSelectedFiles([]);
+      setClearFilesTrigger(prev => prev + 1);
+    } catch { /* 父页面报告错误，当前编辑内容保留。 */ }
+    finally { if (mountedRef.current) { submittingRef.current = false; setSubmitting(false); } }
   };
 
   const canStart = () => {
     const content = inputValue.trim();
-    if (!content) return false;
+    if (!content || disabled || submitting || isSystemPromptMode) return false;
 
     switch (currentMode) {
       case 'agent':
@@ -182,9 +199,9 @@ const ModeSelector: React.FC<ModeSelectorProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && !composingRef.current) {
       e.preventDefault();
-      handleStart();
+      void handleStart();
     }
   };
 
@@ -215,7 +232,7 @@ const ModeSelector: React.FC<ModeSelectorProps> = ({
     }
   };
 
-  const handleProjectChange = (projectId: string | null, _projectName: string | null) => {
+  const handleProjectChange = (projectId: string | null | null) => {
     setSelectedProjectId(projectId);
   };
 
@@ -389,6 +406,9 @@ const ModeSelector: React.FC<ModeSelectorProps> = ({
                 position: 'relative'
               }}>
                 <textarea
+                  disabled={disabled || submitting}
+                onCompositionStart={() => { composingRef.current = true; }}
+                onCompositionEnd={() => { composingRef.current = false; }}
                   value={getCurrentInputValue()}
                   onChange={handleInputChange}
                   onKeyDown={handleKeyDown}
@@ -423,6 +443,7 @@ const ModeSelector: React.FC<ModeSelectorProps> = ({
                   {currentMode === 'agent' && (
                     <>
                       <FileUploadButton
+                        disabled={disabled || submitting}
                         onFilesChange={setSelectedFiles}
                         clearTrigger={clearFilesTrigger}
                         addFilesTrigger={addFilesTrigger}

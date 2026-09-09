@@ -43,6 +43,7 @@ const SystemPromptToggle: React.FC<SystemPromptToggleProps> = ({
   return (
     <Tooltip title={getTooltipTitle()}>
       <Button
+        className={className}
         type="text"
         icon={<ArrowLeftRight size={14} strokeWidth={1.5} />}
         onClick={onToggle}

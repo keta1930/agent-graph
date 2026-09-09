@@ -6,7 +6,7 @@ import { ArrowUp } from 'lucide-react';
 import { useGraphEditorStore } from '../../../store/graphEditorStore';
 import { useModelStore } from '../../../store/modelStore';
 import { useMCPStore } from '../../../store/mcpStore';
-import { ConversationMode } from '../../../types/conversation';
+import { ConversationMode, ChatSubmitOptions, ChatInputConfig } from '../../../types/conversation';
 import SystemPromptToggle from '../controls/SystemPromptToggle';
 import AgentPicker from '../controls/AgentPicker';
 import MCPToolSelector from '../controls/MCPToolSelector';
@@ -19,18 +19,11 @@ import FileUploadButton from '../controls/FileUploadButton';
 import { useT } from '../../../i18n/hooks';
 
 interface InputAreaProps {
-  onSendMessage: (message: string, options?: any) => void;
+  onSendMessage: (message: string, options?: ChatSubmitOptions) => Promise<void> | void;
   disabled?: boolean;
   mode: ConversationMode;
-  inheritedConfig?: {
-    selectedModel?: string;
-    selectedGraph?: string;
-    systemPrompt?: string;
-    selectedMCPServers?: string[];
-    selectedAgent?: string | null;
-    selectedSystemTools?: string[];
-    maxIterations?: number | null;
-  };
+  inheritedConfig?: ChatInputConfig;
+  conversationId?: string;
 }
 
 /**
@@ -39,7 +32,7 @@ interface InputAreaProps {
  * 支持 Agent 和 Graph 两种模式的消息输入。
  * 提供多种配置选项，包括模型选择、Agent 选择、工具选择等。
  */
-const InputArea: React.FC<InputAreaProps> = ({
+const InputAreaSession: React.FC<InputAreaProps> = ({
   onSendMessage,
   disabled = false,
   mode,
@@ -47,14 +40,14 @@ const InputArea: React.FC<InputAreaProps> = ({
 }) => {
   const t = useT();
   const [inputValue, setInputValue] = useState('');
-  const [systemPrompt, setSystemPrompt] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState(inheritedConfig.systemPrompt ?? '');
   const [isSystemPromptMode, setIsSystemPromptMode] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<string>('');
-  const [selectedGraph, setSelectedGraph] = useState<string>('');
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const [selectedMCPServers, setSelectedMCPServers] = useState<Record<string, boolean>>({});
-  const [selectedSystemTools, setSelectedSystemTools] = useState<string[]>([]);
-  const [maxIterations, setMaxIterations] = useState<number | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>(inheritedConfig.selectedModel ?? '');
+  const [selectedGraph, setSelectedGraph] = useState<string>(inheritedConfig.selectedGraph ?? '');
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(inheritedConfig.selectedAgent ?? null);
+  const [selectedMCPServers, setSelectedMCPServers] = useState<Record<string, boolean>>(() => Object.fromEntries((inheritedConfig.selectedMCPServers ?? []).map(name => [name, true])));
+  const [selectedSystemTools, setSelectedSystemTools] = useState<string[]>(inheritedConfig.selectedSystemTools ?? []);
+  const [maxIterations, setMaxIterations] = useState<number | null>(inheritedConfig.maxIterations ?? null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [clearFilesTrigger, setClearFilesTrigger] = useState<number>(0);
   const [addFilesTrigger, setAddFilesTrigger] = useState<{ files: File[]; timestamp: number } | undefined>();
@@ -62,11 +55,25 @@ const InputArea: React.FC<InputAreaProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputContainerRef = useRef<HTMLDivElement>(null);
 
-  const [isConfigInitialized, setIsConfigInitialized] = useState(false);
+  const submittingRef = useRef(false);
+  const composingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
-  const { models: availableModels } = useModelStore();
-  const { graphs: availableGraphs } = useGraphEditorStore();
-  const { config: mcpConfig, status: mcpStatus } = useMCPStore();
+  const mcpReady = useMCPStore(state => state.configLoaded);
+  const fetchModels = useModelStore(state => state.fetchModels);
+  const fetchGraphs = useGraphEditorStore(state => state.fetchGraphs);
+  const fetchMCPConfig = useMCPStore(state => state.fetchConfig);
+  const fetchMCPStatus = useMCPStore(state => state.fetchStatus);
+  useEffect(() => {
+    void fetchModels(); void fetchGraphs(); void fetchMCPStatus();
+    void fetchMCPConfig();
+  }, [fetchModels, fetchGraphs, fetchMCPConfig, fetchMCPStatus]);
+  const availableModels = useModelStore(state => state.models);
+  const availableGraphs = useGraphEditorStore(state => state.graphs);
+  const mcpConfig = useMCPStore(state => state.config);
+  const mcpStatus = useMCPStore(state => state.status);
 
   const availableMCPServers = React.useMemo(() => {
     return Object.keys(mcpConfig.mcpServers || {}).filter(serverName => {
@@ -80,37 +87,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     return status?.connected || false;
   }, [mcpStatus]);
 
-  // 初始化继承的配置（只在第一次或配置变化时执行）
   useEffect(() => {
-    if (!isConfigInitialized || Object.keys(inheritedConfig).length > 0) {
-      // 设置模型（如果为 undefined 则清空）
-      setSelectedModel(inheritedConfig.selectedModel || '');
-      
-      // 设置图（如果为 undefined 则清空）
-      setSelectedGraph(inheritedConfig.selectedGraph || '');
-      
-      // 设置系统提示词（如果为 undefined 则清空）
-      setSystemPrompt(inheritedConfig.systemPrompt || '');
-      
-      // 设置 Agent（如果为 undefined 则清空）
-      setSelectedAgent(inheritedConfig.selectedAgent !== undefined ? inheritedConfig.selectedAgent : null);
-      
-      // 设置系统工具（如果为 undefined 或空数组则清空）
-      setSelectedSystemTools(inheritedConfig.selectedSystemTools || []);
-      
-      // 设置最大迭代次数（如果为 undefined 则清空）
-      setMaxIterations(inheritedConfig.maxIterations !== undefined ? inheritedConfig.maxIterations : null);
-      
-      // 设置 MCP 服务器
-      const initialStates: Record<string, boolean> = {};
-      availableMCPServers.forEach(serverName => {
-        initialStates[serverName] = inheritedConfig.selectedMCPServers?.includes(serverName) || false;
-      });
-      setSelectedMCPServers(initialStates);
-      
-      setIsConfigInitialized(true);
-    }
-  }, [inheritedConfig, availableMCPServers, isConfigInitialized]);
+    if (!mcpReady) return;
+    setSelectedMCPServers(previous => Object.fromEntries(Object.entries(previous).filter(([name]) => availableMCPServers.includes(name))));
+  }, [availableMCPServers, mcpReady]);
 
   useEffect(() => {
     if (mode === 'agent' && !selectedModel && availableModels.length > 0) {
@@ -135,19 +115,19 @@ const InputArea: React.FC<InputAreaProps> = ({
     }));
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const currentInput = isSystemPromptMode ? systemPrompt : inputValue;
-    if (!currentInput.trim()) return;
+    if (!canSend() || submittingRef.current || composingRef.current) return;
 
     if (isSystemPromptMode) {
       setIsSystemPromptMode(false);
       return;
     }
 
-    const options: any = {};
+    const options: ChatSubmitOptions = {};
 
     switch (mode) {
-      case 'agent':
+      case 'agent': {
         options.mode = 'agent';
         options.user_prompt = inputValue.trim();
 
@@ -164,7 +144,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
 
         const enabledMCPServers = Object.entries(selectedMCPServers)
-          .filter(([_, enabled]) => enabled)
+          .filter(([, enabled]) => enabled)
           .map(([serverName]) => serverName);
         if (enabledMCPServers.length > 0) {
           options.mcp_servers = enabledMCPServers;
@@ -183,27 +163,34 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
 
         break;
+      }
       case 'graph':
         options.graph_name = selectedGraph;
         break;
     }
 
-    onSendMessage(currentInput.trim(), options);
-    setInputValue('');
-    setSelectedFiles([]);
-    setClearFilesTrigger(prev => prev + 1);
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      await onSendMessage(currentInput.trim(), options);
+      if (!mountedRef.current) return;
+      setInputValue('');
+      setSelectedFiles([]);
+      setClearFilesTrigger(prev => prev + 1);
+    } catch { /* 父页面报告错误，当前编辑内容保留。 */ }
+    finally { if (mountedRef.current) { submittingRef.current = false; setSubmitting(false); } }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && !composingRef.current) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
   };
 
   const canSend = () => {
     const currentInput = isSystemPromptMode ? systemPrompt : inputValue;
-    if (!currentInput.trim() || disabled) return false;
+    if (!currentInput.trim() || disabled || submitting) return false;
 
     if (isSystemPromptMode) return true;
 
@@ -329,13 +316,15 @@ const InputArea: React.FC<InputAreaProps> = ({
           }}
         >
           <textarea
+                onCompositionStart={() => { composingRef.current = true; }}
+                onCompositionEnd={() => { composingRef.current = false; }}
             ref={textareaRef}
             value={getCurrentInputValue()}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder={getInputPlaceholder()}
             rows={3}
-            disabled={disabled}
+            disabled={disabled || submitting}
             style={{
               width: '100%',
               background: 'transparent',
@@ -367,7 +356,7 @@ const InputArea: React.FC<InputAreaProps> = ({
               <>
                 <FileUploadButton
                   onFilesChange={setSelectedFiles}
-                  disabled={disabled}
+                  disabled={disabled || submitting}
                   clearTrigger={clearFilesTrigger}
                   addFilesTrigger={addFilesTrigger}
                 />
@@ -480,5 +469,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     </div>
   );
 };
+
+const InputArea: React.FC<InputAreaProps> = props => <InputAreaSession key={props.conversationId} {...props} />;
 
 export default InputArea;

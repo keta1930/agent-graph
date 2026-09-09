@@ -1,5 +1,8 @@
+import type { JsonValue } from '../types/json';
+import { getErrorMessage } from '../utils/errors';
+import { getSessionGeneration, isCurrentSession } from '../utils/authSession';
 // src/pages/ExportManager.tsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   Button,
   Card,
@@ -43,6 +46,8 @@ const { Title, Text } = Typography;
 const { Header, Content } = Layout;
 
 const ExportManager: React.FC = () => {
+  const requests = useRef({ conversations: 0, datasets: 0, preview: 0, export: 0 });
+  const conversationController = useRef<AbortController | null>(null);
   const navigate = useNavigate();
   const t = useT();
 
@@ -51,6 +56,7 @@ const ExportManager: React.FC = () => {
 
   // Conversations
   const [loadingConvs, setLoadingConvs] = useState(false);
+  const [conversationError, setConversationError] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null]);
@@ -70,36 +76,46 @@ const ExportManager: React.FC = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
   const [previewModalTitle, setPreviewModalTitle] = useState<string>('');
-  const [previewModalData, setPreviewModalData] = useState<any>(null);
+  const [previewModalData, setPreviewModalData] = useState<JsonValue>(null);
 
-  const loadConversations = async () => {
+  const loadConversations = useCallback(async () => {
+    const owner = ++requests.current.conversations;
+    conversationController.current?.abort();
+    const controller = new AbortController();
+    conversationController.current = controller;
+    const session = getSessionGeneration();
+    const isCurrent = () => owner === requests.current.conversations && isCurrentSession(session) && !controller.signal.aborted;
     try {
       setLoadingConvs(true);
-      const res = await ConversationService.getConversations();
-      setConversations(res.conversations || []);
-    } catch (e) {
-      // ignore
+      setConversationError(null);
+      const res = await ConversationService.getConversations({ signal: controller.signal });
+      if (isCurrent()) setConversations(res.conversations || []);
+    } catch (error) {
+      if (isCurrent()) setConversationError(getErrorMessage(error));
     } finally {
-      setLoadingConvs(false);
+      if (isCurrent()) setLoadingConvs(false);
     }
-  };
+  }, []);
 
-  const loadDatasets = async () => {
+  const loadDatasets = useCallback(async () => {
+    const owner = ++requests.current.datasets;
     try {
       setListLoading(true);
       const res: ListResponse = await exportService.listDatasets();
-      setDatasets(res.success ? res.exports : []);
-    } catch (e) {
-      setDatasets([]);
+      if (owner === requests.current.datasets) setDatasets(res.success ? res.exports : []);
+    } catch {
+      if (owner === requests.current.datasets) setDatasets([]);
     } finally {
-      setListLoading(false);
+      if (owner === requests.current.datasets) setListLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadConversations();
     loadDatasets();
-  }, []);
+    const state = requests.current;
+    return () => { state.conversations++; state.datasets++; state.preview++; state.export++; conversationController.current?.abort(); };
+  }, [loadConversations, loadDatasets]);
 
   const filteredConversations = useMemo(() => {
     return conversations.filter(conv => {
@@ -132,6 +148,7 @@ const ExportManager: React.FC = () => {
   const deselectAll = () => setSelectedIds(new Set());
 
   const doExport = async () => {
+    const owner = ++requests.current.export;
     try {
       setExporting(true);
       setExportError(null);
@@ -148,6 +165,7 @@ const ExportManager: React.FC = () => {
         data_format: values.data_format,
         conversation_ids: Array.from(selectedIds),
       });
+      if (owner !== requests.current.export) return;
       if (!res.success) {
         setExportError(res.message || t('pages.exportManager.exportFailed'));
       } else {
@@ -155,22 +173,27 @@ const ExportManager: React.FC = () => {
         setActiveTab('datasets');
         await loadDatasets();
       }
-    } catch (e: any) {
-      setExportError(e?.message || t('pages.exportManager.exportFailed'));
+    } catch (e) {
+      if (owner !== requests.current.export) return;
+      setExportError(getErrorMessage(e, t('pages.exportManager.exportFailed')));
     } finally {
-      setExporting(false);
+      if (owner === requests.current.export) setExporting(false);
     }
   };
 
   const doPreview = async (name: string, format: string) => {
+    const owner = ++requests.current.preview;
     try {
       setPreviewLoading(true);
       const res = await exportService.previewDataset(name, format);
+      if (owner !== requests.current.preview) return;
       setPreviewModalTitle(res?.dataset_name || name);
       setPreviewModalData(res?.preview_data || []);
       setPreviewModalVisible(true);
+    } catch (error) {
+      if (owner === requests.current.preview) setExportError(getErrorMessage(error));
     } finally {
-      setPreviewLoading(false);
+      if (owner === requests.current.preview) setPreviewLoading(false);
     }
   };
 
@@ -325,6 +348,7 @@ const ExportManager: React.FC = () => {
                       }}
                     >
                       <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                        {conversationError && <Alert type="error" showIcon message={conversationError} />}
                         <Input
                           placeholder={t('pages.exportManager.searchPlaceholder')}
                           value={searchQuery}
@@ -348,14 +372,14 @@ const ExportManager: React.FC = () => {
                             background: 'rgba(255, 255, 255, 0.85)'
                           }}
                           onChange={(vals) => {
-                            const start = vals?.[0] ? new Date((vals[0] as any).valueOf()) : null;
-                            const end = vals?.[1] ? new Date((vals[1] as any).valueOf()) : null;
+                            const start = vals?.[0] ? new Date(vals[0].valueOf()) : null;
+                            const end = vals?.[1] ? new Date(vals[1].valueOf()) : null;
                             setDateRange([start, end]);
                           }}
                         />
                         <Select
                           value={typeFilter}
-                          onChange={(v) => setTypeFilter(v as any)}
+                          onChange={setTypeFilter}
                           style={{ width: '100%' }}
                           options={[
                             { label: t('pages.exportManager.typeAll'), value: 'all' },
@@ -365,7 +389,7 @@ const ExportManager: React.FC = () => {
                         />
                         <Select
                           value={statusFilter}
-                          onChange={(v) => setStatusFilter(v as any)}
+                          onChange={setStatusFilter}
                           style={{ width: '100%' }}
                           options={[
                             { label: t('pages.exportManager.statusAll'), value: 'all' },
@@ -774,7 +798,7 @@ const ExportManager: React.FC = () => {
                       {
                         title: t('pages.exportManager.actions'),
                         key: 'actions',
-                        render: (_: any, record: DatasetListItem) => (
+                        render: (_: unknown, record: DatasetListItem) => (
                           <Space size="small">
                             <div
                               onClick={() => doPreview(record.dataset_name, record.data_format)}
@@ -878,7 +902,7 @@ const ExportManager: React.FC = () => {
         title={previewModalTitle}
         data={previewModalData}
         loading={previewLoading}
-        onClose={() => setPreviewModalVisible(false)}
+        onClose={() => { requests.current.preview++; setPreviewModalVisible(false); }}
       />
     </Layout>
   );

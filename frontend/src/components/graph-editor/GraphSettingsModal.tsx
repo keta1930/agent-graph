@@ -44,7 +44,7 @@ const GraphSettingsModal: React.FC<GraphSettingsModalProps> = ({
       const values = await form.validateFields();
       await onOk(values);
       onCancel();
-    } catch (error) {
+    } catch {
       // Form validation error or submission error
     }
   };

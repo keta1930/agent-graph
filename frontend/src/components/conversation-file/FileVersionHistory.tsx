@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { getErrorMessage } from '../../utils/errors';
+import React, { useState, useEffect, useRef } from 'react';
 import { List, Card, Typography, Space, Button, Tag, message, Spin, Modal, Divider } from 'antd';
 import {
-  History,
   Eye,
   CheckCircle,
   Clock,
@@ -13,7 +13,7 @@ import { formatFileSize } from '../../utils/fileUtils';
 import * as Diff from 'diff';
 import { useT } from '../../i18n/hooks';
 
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 
 interface FileVersionHistoryProps {
   filename: string;
@@ -40,6 +40,15 @@ const FileVersionHistory: React.FC<FileVersionHistoryProps> = ({
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [diffModalVisible, setDiffModalVisible] = useState(false);
   const fetchVersion = getFileVersion || conversationFileService.getFileVersion;
+
+  const request = useRef(0);
+  useEffect(() => {
+    request.current += 1;
+    setSelectedVersion(null);
+    setViewModalVisible(false);
+    setDiffModalVisible(false);
+    return () => { request.current += 1; };
+  }, [filename, resourceId]);
 
   const formatTimestamp = (timestamp: string): string => {
     try {
@@ -77,6 +86,7 @@ const FileVersionHistory: React.FC<FileVersionHistoryProps> = ({
   };
 
   const handleViewVersion = async (version: FileVersion) => {
+    const owner = ++request.current;
     setLoading(true);
     try {
       const response = await fetchVersion(
@@ -84,16 +94,19 @@ const FileVersionHistory: React.FC<FileVersionHistoryProps> = ({
         filename,
         version.version_id
       );
+      if (owner !== request.current) return;
       setSelectedVersion(response.file);
       setViewModalVisible(true);
-    } catch (error: any) {
-      message.error(t('pages.fileManager.fileVersionHistory.loadFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== request.current) return;
+      message.error(t('pages.fileManager.fileVersionHistory.loadFailed', { error: getErrorMessage(error) }));
     } finally {
-      setLoading(false);
+      if (owner === request.current) setLoading(false);
     }
   };
 
   const handleCompareVersion = async (version: FileVersion) => {
+    const owner = ++request.current;
     setLoading(true);
     try {
       const response = await fetchVersion(
@@ -101,12 +114,14 @@ const FileVersionHistory: React.FC<FileVersionHistoryProps> = ({
         filename,
         version.version_id
       );
+      if (owner !== request.current) return;
       setSelectedVersion(response.file);
       setDiffModalVisible(true);
-    } catch (error: any) {
-      message.error(t('pages.fileManager.fileVersionHistory.loadFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== request.current) return;
+      message.error(t('pages.fileManager.fileVersionHistory.loadFailed', { error: getErrorMessage(error) }));
     } finally {
-      setLoading(false);
+      if (owner === request.current) setLoading(false);
     }
   };
 

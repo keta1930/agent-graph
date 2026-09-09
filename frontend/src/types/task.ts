@@ -79,7 +79,7 @@ export interface TaskStatusUpdate {
 export interface TaskResponse {
   status: string;
   message: string;
-  data?: any;
+  data?: { task_id?: string; status?: TaskStatus; scheduled?: boolean; reloaded_count?: number };
 }
 
 export interface ScheduledJob {

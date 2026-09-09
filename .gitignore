@@ -85,5 +85,7 @@ agent-workspace/
 
 # Repository-specific local working directories
 test/
+!frontend/src/test/
+!frontend/src/test/**
 experimental/
 spec/

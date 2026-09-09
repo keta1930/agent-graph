@@ -1,4 +1,5 @@
 // src/pages/RegisterPage.tsx
+import { getErrorMessage } from '../utils/errors';
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Input, Button, Alert, Typography, Space, Progress } from 'antd';
@@ -72,8 +73,9 @@ const RegisterPage: React.FC = () => {
       navigate('/login', {
         state: { message: t('pages.register.registerSuccess') }
       });
-    } catch (err: any) {
-      const detail = err.response?.data?.detail;
+    } catch (err: unknown) {
+      const detail = getErrorMessage(err, t('pages.register.registerFailedDefault'));
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       if (detail === 'Invalid invite code') {
         setError(t('pages.register.invalidInviteCode'));
       } else if (detail === 'User already exists') {

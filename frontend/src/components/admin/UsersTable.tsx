@@ -13,8 +13,29 @@ interface UsersTableProps {
   onPageChange: (page: number) => void;
   onPromoteUser: (userId: string) => void;
   onDeactivateUser: (userId: string) => void;
-  t: (key: string, params?: any) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
 }
+
+const tableComponents = {
+  body: {
+    row: (props: React.ComponentProps<'tr'>) => (
+      <tr
+        {...props}
+        style={{
+          transition: 'all 0.2s ease',
+          ...props.style
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = 'rgba(250, 248, 245, 0.5)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'transparent';
+        }}
+      />
+    )
+  }
+};
+
 
 /**
  * 用户管理表格组件
@@ -29,26 +50,6 @@ const UsersTable: React.FC<UsersTableProps> = ({
   onDeactivateUser,
   t,
 }) => {
-  // 表格自定义样式组件
-  const tableComponents = {
-    body: {
-      row: (props: any) => (
-        <tr
-          {...props}
-          style={{
-            transition: 'all 0.2s ease',
-            ...props.style
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(250, 248, 245, 0.5)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-          }}
-        />
-      )
-    }
-  };
 
   // 用户表格列定义
   const columns = [
@@ -135,7 +136,7 @@ const UsersTable: React.FC<UsersTableProps> = ({
     {
       title: t('pages.adminPanel.users.actions'),
       key: 'action',
-      render: (_: any, record: User) => (
+      render: (_: unknown, record: User) => (
         <Space size={8}>
           {record.role === 'user' && record.is_active && (
             <Button

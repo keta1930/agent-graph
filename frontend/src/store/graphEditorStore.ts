@@ -1,150 +1,97 @@
-// src/store/graphEditorStore.ts
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import * as graphService from '../services/graphService';
-import { AgentNode, BackendGraphConfig, NodePosition, GraphVersionRecord } from '../types/graph';
+import type {
+  AgentNode,
+  BackendGraphConfig,
+  NodePosition,
+  GraphVersionRecord,
+} from '../types/graph';
+import { getSessionGeneration, isCurrentSession, registerSessionReset } from '../utils/authSession';
+import { getErrorMessage } from '../utils/errors';
+import {
+  parseGraphConfig,
+  renameTemplateReferences,
+  toBackendConfig,
+  validateNodeName,
+} from '../utils/graphEditorModel';
 
-interface GraphConfig {
-  name: string;
-  description: string;
-  nodes: AgentNode[];
-  end_template?: string;
-}
-
+type GraphConfig = BackendGraphConfig;
 interface GraphEditorState {
   graphs: string[];
   currentGraph: GraphConfig | null;
   originalGraph: GraphConfig | null;
   loading: boolean;
+  saving: boolean;
   error?: string;
   selectedNode: string | null;
   dirty: boolean;
-
-  // 图列表操作
+  editorSession: number;
+  editRevision: number;
+  savedRevision: number;
+  jsonDraft: string | null;
+  versions: GraphVersionRecord[];
+  loadingVersions: boolean;
   fetchGraphs: () => Promise<void>;
   createNewGraph: (name: string, description: string) => void;
   loadGraph: (name: string) => Promise<void>;
+  closeGraph: () => void;
   saveGraph: () => Promise<void>;
   deleteGraph: (name: string) => Promise<void>;
   renameGraph: (oldName: string, newName: string) => Promise<void>;
-
-  // 图属性操作
   updateGraphProperties: (updates: Partial<GraphConfig>) => void;
-  updateGraphFromJson: (backendConfig: BackendGraphConfig) => void;
-
-  // 节点操作
+  updateGraphFromJson: (config: BackendGraphConfig) => void;
+  beginJsonEditing: () => void;
+  setJsonDraft: (text: string) => void;
+  applyJsonDraft: () => void;
+  endJsonEditing: () => void;
+  registerPositionFlusher: (flush: () => void) => () => void;
   addNode: (node: Partial<AgentNode>) => void;
   updateNode: (id: string, updates: Partial<AgentNode>) => void;
   removeNode: (id: string) => void;
   selectNode: (id: string | null) => void;
   updateNodePosition: (id: string, position: NodePosition) => void;
-
-  // 连接操作 - 更新为基于节点数据的连接管理
+  updateNodePositions: (positions: Record<string, NodePosition>) => void;
   addConnection: (source: string, target: string) => void;
   removeConnection: (source: string, target: string) => void;
-
-  // 新增：自动布局功能
   autoLayout: () => void;
-
-  // 新增：导入导出功能
-  importGraph: (filePath: string) => Promise<any>;
-  importGraphFromFile: (file: File) => Promise<any>;
-  exportGraph: (graphName: string) => Promise<any>;
-  importGraphPackage: (filePath: string) => Promise<any>;
-  importGraphPackageFromFile: (file: File) => Promise<any>;
-
-
-  // 新增：README功能
-  getGraphReadme: (graphName: string) => Promise<any>;
-
-  // MCP导出
-  generateMCPScript: (graphName: string) => Promise<any>;
-
-  // 版本管理
-  versions: GraphVersionRecord[];
-  loadingVersions: boolean;
-  fetchVersions: (graphName: string) => Promise<void>;
-  createVersion: (graphName: string, commitMessage: string) => Promise<void>;
-  loadVersion: (graphName: string, versionId: string) => Promise<void>;
-  deleteVersion: (graphName: string, versionId: string) => Promise<void>;
+  importGraph: typeof graphService.importGraph;
+  importGraphFromFile: typeof graphService.importGraphFromFile;
+  exportGraph: typeof graphService.exportGraph;
+  importGraphPackage: typeof graphService.importGraphPackage;
+  importGraphPackageFromFile: typeof graphService.importGraphPackageFromFile;
+  getGraphReadme: typeof graphService.getGraphReadme;
+  generateMCPScript: (name: string) => Promise<void>;
+  fetchVersions: (name: string) => Promise<void>;
+  createVersion: (name: string, message: string) => Promise<void>;
+  loadVersion: (name: string, versionId: string) => Promise<void>;
+  deleteVersion: (name: string, versionId: string) => Promise<void>;
 }
 
-// 创建默认节点
-const createDefaultNode = (nodeData: Partial<AgentNode>): AgentNode => {
+const createDefaultNode = (node: Partial<AgentNode>): AgentNode => ({
+  name: 'Node ' + Date.now(),
+  is_subgraph: false,
+  mcp_servers: [],
+  system_tools: [],
+  system_prompt: '',
+  user_prompt: '',
+  input_nodes: [],
+  output_nodes: [],
+  output_enabled: true,
+  position: { x: 100, y: 100 },
+  ...node,
+  id: uuidv4(),
+});
+const fromBackend = (config: BackendGraphConfig, previous?: GraphConfig | null): GraphConfig => {
+  const graph = parseGraphConfig(config);
+  const previousIds = new Map(previous?.nodes.map((node) => [node.name, node.id]));
   return {
-    id: uuidv4(),
-    name: nodeData.name || `Node ${Date.now()}`,
-    description: nodeData.description || "",
-    agent_name: nodeData.agent_name,
-    is_subgraph: nodeData.is_subgraph || false,
-    model_name: nodeData.model_name || "",
-    subgraph_name: nodeData.subgraph_name || "",
-    mcp_servers: nodeData.mcp_servers || [],
-    system_tools: nodeData.system_tools || [],
-    system_prompt: nodeData.system_prompt || "",
-    user_prompt: nodeData.user_prompt || "",
-    max_iterations: nodeData.max_iterations,
-    input_nodes: nodeData.input_nodes || [],
-    output_nodes: nodeData.output_nodes || [],
-    handoffs: nodeData.handoffs,
-    output_enabled: nodeData.output_enabled ?? true,
-    position: nodeData.position || { x: 100, y: 100 },
-    level: nodeData.level
-  };
-};
-
-// 转换为后端格式
-const convertToBackendFormat = (graph: GraphConfig): BackendGraphConfig => {
-  return {
-    name: graph.name,
-    description: graph.description || "",
-    end_template: graph.end_template,
-    nodes: graph.nodes.map(node => {
-      const result: any = {
-        name: node.name,
-        description: node.description || "",
-        agent_name: node.agent_name || null,
-        is_subgraph: node.is_subgraph,
-        mcp_servers: node.mcp_servers || [],
-        system_tools: node.system_tools || [],
-        system_prompt: node.system_prompt || "",
-        user_prompt: node.user_prompt || "",
-        max_iterations: node.max_iterations || undefined,
-        input_nodes: node.input_nodes || [],
-        output_nodes: node.output_nodes || [],
-        handoffs: node.handoffs,
-        output_enabled: node.output_enabled ?? true,
-        position: node.position || { x: 100, y: 100 },
-        level: node.level
-      };
-
-      // 根据节点类型添加特定字段
-      if (node.is_subgraph) {
-        result.subgraph_name = node.subgraph_name || "";
-      } else {
-        result.model_name = node.model_name || "";
-      }
-
-      return result;
-    })
-  };
-};
-
-// 从后端格式转换，添加前端需要的字段
-const convertFromBackendFormat = (backendGraph: any): GraphConfig => {
-  return {
-    ...backendGraph,
-    nodes: backendGraph.nodes.map((node: any) => ({
+    ...graph,
+    nodes: graph.nodes.map((node) => ({
       ...node,
-      id: uuidv4(), // 添加前端ID
-      description: node.description || "",
-      agent_name: node.agent_name,
-      system_tools: node.system_tools || [],
-      max_iterations: node.max_iterations,
-      position: node.position || { x: 100, y: 100 },
-      input_nodes: node.input_nodes || [],
-      output_nodes: node.output_nodes || [],
-    }))
+      id: previousIds.get(node.name) ?? uuidv4(),
+      position: node.position ?? { x: 100, y: 100 },
+    })),
   };
 };
 
@@ -154,7 +101,7 @@ const calculateAutoLayout = (nodes: AgentNode[]): { [nodeId: string]: NodePositi
 
   // 创建节点映射
   const nodeMap = new Map<string, AgentNode>();
-  nodes.forEach(node => {
+  nodes.forEach((node) => {
     nodeMap.set(node.name, node);
   });
 
@@ -169,14 +116,14 @@ const calculateAutoLayout = (nodes: AgentNode[]): { [nodeId: string]: NodePositi
       if (visited.has(nodeName)) {
         return levels.get(nodeName) || 0;
       }
-      
+
       if (visiting.has(nodeName)) {
         // 检测到循环，返回当前已知的最小层级
         return levels.get(nodeName) || 0;
       }
 
       visiting.add(nodeName);
-      
+
       const node = nodeMap.get(nodeName);
       if (!node) {
         visited.add(nodeName);
@@ -193,7 +140,7 @@ const calculateAutoLayout = (nodes: AgentNode[]): { [nodeId: string]: NodePositi
       }
 
       let maxInputLevel = -1;
-      
+
       // 遍历输入节点
       for (const inputNodeName of node.input_nodes || []) {
         if (inputNodeName === 'start') {
@@ -206,15 +153,15 @@ const calculateAutoLayout = (nodes: AgentNode[]): { [nodeId: string]: NodePositi
 
       const currentLevel = maxInputLevel + 1;
       levels.set(nodeName, currentLevel);
-      
+
       visiting.delete(nodeName);
       visited.add(nodeName);
-      
+
       return currentLevel;
     };
 
     // 计算所有节点的层级
-    nodes.forEach(node => {
+    nodes.forEach((node) => {
       dfs(node.name);
     });
 
@@ -225,7 +172,7 @@ const calculateAutoLayout = (nodes: AgentNode[]): { [nodeId: string]: NodePositi
 
   // 按层级分组节点
   const levelGroups = new Map<number, AgentNode[]>();
-  nodes.forEach(node => {
+  nodes.forEach((node) => {
     const level = nodeLevels.get(node.name) || 0;
     if (!levelGroups.has(level)) {
       levelGroups.set(level, []);
@@ -234,25 +181,25 @@ const calculateAutoLayout = (nodes: AgentNode[]): { [nodeId: string]: NodePositi
   });
 
   // 布局常量 - 横向布局
-  const LEVEL_WIDTH = 300;    // 层级间水平间距
-  const NODE_HEIGHT = 200;    // 节点间垂直间距
-  const START_X = 100;        // 起始X坐标
-  const START_Y = 100;        // 起始Y坐标
+  const LEVEL_WIDTH = 300; // 层级间水平间距
+  const NODE_HEIGHT = 200; // 节点间垂直间距
+  const START_X = 100; // 起始X坐标
+  const START_Y = 100; // 起始Y坐标
 
   // 生成位置
   const positions: { [nodeId: string]: NodePosition } = {};
-  
+
   // 获取所有层级并排序
   const sortedLevels = Array.from(levelGroups.keys()).sort((a, b) => a - b);
 
   sortedLevels.forEach((level, levelIndex) => {
     const nodesInLevel = levelGroups.get(level)!;
     const x = START_X + levelIndex * LEVEL_WIDTH; // 横向排列：X坐标根据层级递增
-    
+
     // 垂直居中排列
     const totalHeight = (nodesInLevel.length - 1) * NODE_HEIGHT;
     const startY = START_Y + Math.max(0, (600 - totalHeight) / 2); // 假设画布高度为600px
-    
+
     nodesInLevel.forEach((node, nodeIndex) => {
       const y = startY + nodeIndex * NODE_HEIGHT;
       positions[node.id!] = { x, y };
@@ -262,568 +209,452 @@ const calculateAutoLayout = (nodes: AgentNode[]): { [nodeId: string]: NodePositi
   return positions;
 };
 
-export const useGraphEditorStore = create<GraphEditorState>((set, get) => ({
+let loadGeneration = 0;
+let listGeneration = 0;
+let versionGeneration = 0;
+let operationGeneration = 0;
+let positionFlusher: (() => void) | undefined;
+let listRequest: Promise<void> | undefined;
+let saveRequest: { session: number; promise: Promise<void> } | undefined;
+
+const initialState = () => ({
   graphs: [],
   currentGraph: null,
   originalGraph: null,
   loading: false,
+  saving: false,
   selectedNode: null,
   dirty: false,
-
-  // 版本管理状态
+  error: undefined,
+  editRevision: 0,
+  savedRevision: 0,
+  jsonDraft: null,
   versions: [],
   loadingVersions: false,
+});
 
-  fetchGraphs: async () => {
-    try {
-      set({ loading: true, error: undefined });
-      const graphs = await graphService.getGraphs();
-      set({ graphs, loading: false });
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch graphs'
-      });
-    }
-  },
-
-  createNewGraph: (name, description) => {
-    const newGraph: GraphConfig = {
-      name,
-      description,
-      nodes: [],
-      end_template: ""
-    };
-    set({
-      currentGraph: newGraph,
-      originalGraph: newGraph,
+export const useGraphEditorStore = create<GraphEditorState>((set, get) => {
+  const changed = (graph: GraphConfig) =>
+    set((state) => ({
+      currentGraph: graph,
+      editRevision: state.editRevision + 1,
+      dirty: true,
+      selectedNode: graph.nodes.some((node) => node.id === state.selectedNode)
+        ? state.selectedNode
+        : null,
+    }));
+  const active = (epoch: number, session: number) =>
+    isCurrentSession(epoch) && get().editorSession === session;
+  const assertActive = (epoch: number, session: number) => {
+    if (!active(epoch, session))
+      throw new DOMException('Graph editor session changed', 'AbortError');
+  };
+  const replaceEditor = (graph: GraphConfig | null, original = graph, dirty = false) => {
+    loadGeneration++;
+    versionGeneration++;
+    operationGeneration++;
+    positionFlusher = undefined;
+    saveRequest = undefined;
+    set((state) => ({
+      currentGraph: graph,
+      originalGraph: original,
       selectedNode: null,
-      dirty: true
+      dirty,
+      editRevision: dirty ? 1 : 0,
+      savedRevision: 0,
+      editorSession: state.editorSession + 1,
+      jsonDraft: null,
+      versions: [],
+      loadingVersions: false,
+      saving: false,
+      loading: false,
+      error: undefined,
+    }));
+  };
+  const refreshGraphList = () => {
+    // mutation 之前发出的列表即使尚未返回，也不能用于确认这次写入。
+    listGeneration++;
+    listRequest = undefined;
+    return get().fetchGraphs();
+  };
+  // 非编辑器请求仍校验账户；只有最新操作可以结束自己的 loading。
+  const operation = async <T>(request: () => Promise<T>, refresh = false): Promise<T> => {
+    const epoch = getSessionGeneration();
+    const token = ++operationGeneration;
+    set({ loading: true, error: undefined });
+    try {
+      const result = await request();
+      if (!isCurrentSession(epoch)) throw new DOMException('Session changed', 'AbortError');
+      if (refresh) await refreshGraphList();
+      if (!isCurrentSession(epoch)) throw new DOMException('Session changed', 'AbortError');
+      return result;
+    } catch (error) {
+      if (isCurrentSession(epoch) && token === operationGeneration)
+        set({ error: getErrorMessage(error) });
+      throw error;
+    } finally {
+      if (isCurrentSession(epoch) && token === operationGeneration) set({ loading: false });
+    }
+  };
+  const connection = (sourceId: string, targetId: string, remove: boolean) => {
+    const graph = get().currentGraph;
+    const source = graph?.nodes.find((node) => node.id === sourceId);
+    const target = graph?.nodes.find((node) => node.id === targetId);
+    if (!graph || !source || !target) return;
+    const updateNames = (names: string[], name: string) =>
+      remove
+        ? names.filter((item) => item !== name)
+        : names.includes(name)
+          ? names
+          : [...names, name];
+    const nodes = graph.nodes.map((node) => {
+      const input_nodes =
+        node.id === targetId ? updateNames(node.input_nodes, source.name) : node.input_nodes;
+      const output_nodes =
+        node.id === sourceId ? updateNames(node.output_nodes, target.name) : node.output_nodes;
+      return input_nodes === node.input_nodes && output_nodes === node.output_nodes
+        ? node
+        : { ...node, input_nodes, output_nodes };
     });
-  },
-
-  loadGraph: async (name) => {
-    try {
+    changed({ ...graph, nodes });
+  };
+  return {
+    ...initialState(),
+    editorSession: 0,
+    fetchGraphs: () => {
+      if (listRequest) return listRequest;
+      const epoch = getSessionGeneration();
+      const token = ++listGeneration;
+      const request = (async () => {
+        try {
+          const graphs = await graphService.getGraphs();
+          if (isCurrentSession(epoch) && token === listGeneration) set({ graphs });
+        } catch (error) {
+          if (isCurrentSession(epoch) && token === listGeneration)
+            set({ error: getErrorMessage(error) });
+        } finally {
+          if (isCurrentSession(epoch) && token === listGeneration) listRequest = undefined;
+        }
+      })();
+      listRequest = request;
+      return request;
+    },
+    createNewGraph: (name, description) =>
+      replaceEditor({ name, description, nodes: [], end_template: '' }, null, true),
+    closeGraph: () => replaceEditor(null),
+    loadGraph: async (name) => {
+      const epoch = getSessionGeneration();
+      const token = ++loadGeneration;
       set({ loading: true, error: undefined });
-      const backendGraph = await graphService.getGraph(name);
-      const graph = convertFromBackendFormat(backendGraph);
-
-      set({
-        currentGraph: graph,
-        originalGraph: graph,
-        loading: false,
-        selectedNode: null,
-        dirty: false
-      });
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : `Failed to load graph ${name}`
-      });
-    }
-  },
-
-  saveGraph: async () => {
-    const { currentGraph } = get();
-    if (!currentGraph) return;
-
-    try {
-      set({ loading: true, error: undefined });
-      const backendGraph = convertToBackendFormat(currentGraph);
-      await graphService.createGraph(backendGraph);
-
-      set({
-        loading: false,
-        dirty: false,
-        originalGraph: JSON.parse(JSON.stringify(currentGraph))
-      });
-      await get().fetchGraphs();
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : '保存图失败'
-      });
-    }
-  },
-
-  deleteGraph: async (name) => {
-    try {
-      set({ loading: true, error: undefined });
-      await graphService.deleteGraph(name);
-      set({ loading: false });
-
-      await get().fetchGraphs();
-      const { currentGraph } = get();
-      if (currentGraph && currentGraph.name === name) {
-        set({ currentGraph: null, originalGraph: null });
+      try {
+        const graph = fromBackend(await graphService.getGraph(name));
+        if (!isCurrentSession(epoch) || token !== loadGeneration)
+          throw new DOMException('Graph load superseded', 'AbortError');
+        replaceEditor(graph);
+      } catch (error) {
+        if (isCurrentSession(epoch) && token === loadGeneration)
+          set({ loading: false, error: getErrorMessage(error) });
+        throw error;
       }
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : `Failed to delete graph ${name}`
+    },
+    saveGraph: () => {
+      const session = get().editorSession;
+      if (saveRequest?.session === session) return saveRequest.promise;
+      try {
+        positionFlusher?.();
+        get().applyJsonDraft();
+      } catch (error) {
+        set({ error: getErrorMessage(error) });
+        return Promise.reject(error);
+      }
+      const { currentGraph, editRevision } = get();
+      if (!currentGraph) return Promise.resolve();
+      const epoch = getSessionGeneration();
+      const snapshot = structuredClone(currentGraph);
+      set({ saving: true, error: undefined });
+      const promise = (async () => {
+        try {
+          await graphService.createGraph(toBackendConfig(snapshot));
+          if (!isCurrentSession(epoch)) throw new DOMException('Session changed', 'AbortError');
+          const refresh = refreshGraphList();
+          assertActive(epoch, session);
+          set((state) => ({
+            originalGraph: snapshot,
+            savedRevision: editRevision,
+            dirty: state.editRevision !== editRevision,
+          }));
+          await refresh;
+          assertActive(epoch, session);
+        } catch (error) {
+          if (active(epoch, session)) set({ error: getErrorMessage(error) });
+          throw error;
+        } finally {
+          if (active(epoch, session)) set({ saving: false });
+          if (active(epoch, session)) saveRequest = undefined;
+        }
+      })();
+      saveRequest = { session, promise };
+      return promise;
+    },
+    deleteGraph: (name) =>
+      operation(async () => {
+        const epoch = getSessionGeneration();
+        const session = get().editorSession;
+        await graphService.deleteGraph(name);
+        if (active(epoch, session) && get().currentGraph?.name === name) replaceEditor(null);
+        if (isCurrentSession(epoch))
+          set((state) => ({ graphs: state.graphs.filter((graph) => graph !== name) }));
+      }, true),
+    renameGraph: (oldName, newName) =>
+      operation(async () => {
+        const epoch = getSessionGeneration();
+        const session = get().editorSession;
+        await graphService.renameGraph(oldName, newName);
+        if (active(epoch, session) && get().currentGraph?.name === oldName) {
+          set((state) => ({
+            currentGraph: state.currentGraph && { ...state.currentGraph, name: newName },
+            originalGraph: state.originalGraph && { ...state.originalGraph, name: newName },
+          }));
+        }
+      }, true),
+    updateGraphProperties: (updates) => {
+      get().applyJsonDraft();
+      const graph = get().currentGraph;
+      if (graph) {
+        const next = { ...graph, ...updates };
+        changed(next);
+        if (get().jsonDraft !== null)
+          set({ jsonDraft: JSON.stringify(toBackendConfig(next), null, 2) });
+      }
+    },
+    updateGraphFromJson: (config) => {
+      const graph = get().currentGraph;
+      if (graph) changed(fromBackend({ ...config, name: graph.name }, graph));
+    },
+    beginJsonEditing: () => {
+      positionFlusher?.();
+      const graph = get().currentGraph;
+      if (graph && get().jsonDraft === null)
+        set({ jsonDraft: JSON.stringify(toBackendConfig(graph), null, 2) });
+    },
+    setJsonDraft: (text) => {
+      if (text !== get().jsonDraft)
+        set((state) => ({ jsonDraft: text, editRevision: state.editRevision + 1, dirty: true }));
+    },
+    applyJsonDraft: () => {
+      const { currentGraph, jsonDraft } = get();
+      if (!currentGraph || jsonDraft === null) return;
+      const config = parseGraphConfig(JSON.parse(jsonDraft));
+      const graph = fromBackend({ ...config, name: currentGraph.name }, currentGraph);
+      if (JSON.stringify(toBackendConfig(graph)) !== JSON.stringify(toBackendConfig(currentGraph)))
+        set((state) => ({
+          currentGraph: graph,
+          selectedNode: graph.nodes.some((node) => node.id === state.selectedNode)
+            ? state.selectedNode
+            : null,
+        }));
+    },
+    endJsonEditing: () => {
+      get().applyJsonDraft();
+      set({ jsonDraft: null });
+    },
+    registerPositionFlusher: (flush) => {
+      positionFlusher = flush;
+      return () => {
+        if (positionFlusher === flush) positionFlusher = undefined;
+      };
+    },
+    addNode: (data) => {
+      const graph = get().currentGraph;
+      if (!graph) return;
+      const node = createDefaultNode(data);
+      validateNodeName(node.name, new Set(graph.nodes.map((item) => item.name)));
+      changed({ ...graph, nodes: [...graph.nodes, node] });
+    },
+    updateNode: (id, updates) => {
+      const graph = get().currentGraph;
+      const node = graph?.nodes.find((item) => item.id === id);
+      if (!graph || !node) return;
+      const newName = updates.name ?? node.name;
+      validateNodeName(
+        newName,
+        new Set(graph.nodes.filter((item) => item.id !== id).map((item) => item.name))
+      );
+      const rename = (text: string) => renameTemplateReferences(text, node.name, newName);
+      const renameNames = (names: string[]) =>
+        names.includes(node.name)
+          ? names.map((name) => (name === node.name ? newName : name))
+          : names;
+      let nodes = graph.nodes.map((item) => {
+        const updated = item.id === id ? { ...item, ...updates } : item;
+        if (newName === node.name) return updated;
+        const input_nodes = renameNames(updated.input_nodes);
+        const output_nodes = renameNames(updated.output_nodes);
+        const system_prompt = rename(updated.system_prompt);
+        const user_prompt = rename(updated.user_prompt);
+        if (
+          input_nodes === updated.input_nodes &&
+          output_nodes === updated.output_nodes &&
+          system_prompt === updated.system_prompt &&
+          user_prompt === updated.user_prompt
+        )
+          return updated;
+        return { ...updated, input_nodes, output_nodes, system_prompt, user_prompt };
       });
-    }
-  },
-
-  renameGraph: async (oldName, newName) => {
-    try {
-      set({ loading: true, error: undefined });
-      await graphService.renameGraph(oldName, newName);
-
-      const { currentGraph } = get();
-      if (currentGraph && currentGraph.name === oldName) {
-        set({
-          currentGraph: { ...currentGraph, name: newName },
-          originalGraph: { ...currentGraph, name: newName }
+      const edited = nodes.find((item) => item.id === id)!;
+      if (updates.input_nodes || updates.output_nodes) {
+        nodes = nodes.map((item) => {
+          if (item.id === id) return item;
+          let input_nodes = item.input_nodes;
+          let output_nodes = item.output_nodes;
+          if (updates.output_nodes)
+            input_nodes = edited.output_nodes.includes(item.name)
+              ? [...new Set([...input_nodes, newName])]
+              : input_nodes.filter((name) => name !== newName);
+          if (updates.input_nodes)
+            output_nodes = edited.input_nodes.includes(item.name)
+              ? [...new Set([...output_nodes, newName])]
+              : output_nodes.filter((name) => name !== newName);
+          return input_nodes === item.input_nodes && output_nodes === item.output_nodes
+            ? item
+            : { ...item, input_nodes, output_nodes };
         });
       }
-
-      set({ loading: false });
-      await get().fetchGraphs();
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : `Failed to rename graph`
+      changed({
+        ...graph,
+        nodes,
+        end_template: newName === node.name ? graph.end_template : rename(graph.end_template ?? ''),
       });
-    }
-  },
-
-  updateGraphProperties: (updates) => {
-    const { currentGraph } = get();
-    if (!currentGraph) return;
-
-    set({
-      currentGraph: { ...currentGraph, ...updates },
-      dirty: true
-    });
-  },
-
-  updateGraphFromJson: (backendConfig) => {
-    const { currentGraph } = get();
-    if (!currentGraph) return;
-
-    // 转换后端格式到前端格式，保留现有图名
-    const updatedGraph = convertFromBackendFormat({
-      ...backendConfig,
-      name: currentGraph.name // 保持当前图名不变
-    });
-
-    set({
-      currentGraph: updatedGraph,
-      dirty: true
-    });
-  },
-
-  addNode: (nodeData) => {
-    const { currentGraph } = get();
-    if (!currentGraph) return;
-
-    const newNode = createDefaultNode(nodeData);
-
-    set({
-      currentGraph: {
-        ...currentGraph,
-        nodes: [...currentGraph.nodes, newNode]
-      },
-      dirty: true
-    });
-  },
-
-  updateNode: (id, updates) => {
-    const { currentGraph } = get();
-    if (!currentGraph) return;
-
-    const updatedNodes = currentGraph.nodes.map(node => {
-      if (node.id !== id) return node;
-      return { ...node, ...updates };
-    });
-
-    set({
-      currentGraph: { ...currentGraph, nodes: updatedNodes },
-      dirty: true
-    });
-  },
-
-  removeNode: (id) => {
-    const { currentGraph, selectedNode } = get();
-    if (!currentGraph) return;
-
-    const nodeToRemove = currentGraph.nodes.find(node => node.id === id);
-    if (!nodeToRemove) return;
-
-    // 移除节点
-    const filteredNodes = currentGraph.nodes.filter(node => node.id !== id);
-
-    // 从其他节点的输入/输出和context列表中移除引用
-    const updatedNodes = filteredNodes.map(node => {
-      const updatedNode = { ...node };
-
-      // 移除输入引用
-      if (updatedNode.input_nodes?.includes(nodeToRemove.name)) {
-        updatedNode.input_nodes = updatedNode.input_nodes.filter(n => n !== nodeToRemove.name);
-      }
-
-      // 移除输出引用
-      if (updatedNode.output_nodes?.includes(nodeToRemove.name)) {
-        updatedNode.output_nodes = updatedNode.output_nodes.filter(n => n !== nodeToRemove.name);
-      }
-
-      return updatedNode;
-    });
-
-    // 如果选中的节点被移除，则清除选择
-    if (selectedNode === id) {
-      set({ selectedNode: null });
-    }
-
-    set({
-      currentGraph: {
-        ...currentGraph,
-        nodes: updatedNodes
-      },
-      dirty: true
-    });
-  },
-
-  selectNode: (id) => {
-    set({ selectedNode: id });
-  },
-
-  updateNodePosition: (id, position) => {
-    const { currentGraph } = get();
-    if (!currentGraph) return;
-
-    const updatedNodes = currentGraph.nodes.map(node =>
-      node.id === id ? { ...node, position } : node
-    );
-
-    set({
-      currentGraph: { ...currentGraph, nodes: updatedNodes },
-      dirty: true
-    });
-  },
-
-  // 自动布局功能
-  autoLayout: () => {
-    const { currentGraph } = get();
-    if (!currentGraph || currentGraph.nodes.length === 0) return;
-
-    try {
-      // 计算新的节点位置
-      const newPositions = calculateAutoLayout(currentGraph.nodes);
-
-      // 更新所有节点的位置
-      const updatedNodes = currentGraph.nodes.map(node => ({
-        ...node,
-        position: newPositions[node.id!] || node.position || { x: 100, y: 100 }
-      }));
-
-      set({
-        currentGraph: {
-          ...currentGraph,
-          nodes: updatedNodes
-        },
-        dirty: true
-      });
-    } catch (error) {
-      console.error('Auto layout failed:', error);
-      throw new Error('自动布局计算失败');
-    }
-  },
-
-  // 更新连接管理逻辑 - 基于节点名称而非ID
-  addConnection: (sourceId, targetId) => {
-    const { currentGraph } = get();
-    if (!currentGraph) return;
-
-    const sourceNode = currentGraph.nodes.find(node => node.id === sourceId);
-    const targetNode = currentGraph.nodes.find(node => node.id === targetId);
-
-    if (!sourceNode || !targetNode) return;
-
-    const updatedNodes = currentGraph.nodes.map(node => {
-      if (node.id === sourceId) {
-        // 添加到源节点的output_nodes
-        if (!node.output_nodes.includes(targetNode.name)) {
+    },
+    removeNode: (id) => {
+      const graph = get().currentGraph;
+      const removed = graph?.nodes.find((node) => node.id === id);
+      if (!graph || !removed) return;
+      const nodes = graph.nodes
+        .filter((node) => node.id !== id)
+        .map((node) => {
+          if (!node.input_nodes.includes(removed.name) && !node.output_nodes.includes(removed.name))
+            return node;
           return {
             ...node,
-            output_nodes: [...node.output_nodes, targetNode.name]
+            input_nodes: node.input_nodes.filter((name) => name !== removed.name),
+            output_nodes: node.output_nodes.filter((name) => name !== removed.name),
           };
-        }
-      } else if (node.id === targetId) {
-        // 添加到目标节点的input_nodes
-        if (!node.input_nodes.includes(sourceNode.name)) {
-          return {
-            ...node,
-            input_nodes: [...node.input_nodes, sourceNode.name]
-          };
-        }
+        });
+      changed({ ...graph, nodes });
+    },
+    selectNode: (id) => set({ selectedNode: id }),
+    updateNodePosition: (id, position) => get().updateNodePositions({ [id]: position }),
+    updateNodePositions: (positions) => {
+      const graph = get().currentGraph;
+      if (!graph) return;
+      let modified = false;
+      const nodes = graph.nodes.map((node) => {
+        const position = positions[node.id!];
+        if (!position || (position.x === node.position?.x && position.y === node.position?.y))
+          return node;
+        modified = true;
+        return { ...node, position: { ...position } };
+      });
+      if (modified) changed({ ...graph, nodes });
+    },
+    autoLayout: () => {
+      const graph = get().currentGraph;
+      if (graph) get().updateNodePositions(calculateAutoLayout(graph.nodes));
+    },
+    addConnection: (source, target) => connection(source, target, false),
+    removeConnection: (source, target) => connection(source, target, true),
+    importGraph: (path) => operation(() => graphService.importGraph(path), true),
+    importGraphFromFile: (file) => operation(() => graphService.importGraphFromFile(file), true),
+    importGraphPackage: (path) => operation(() => graphService.importGraphPackage(path), true),
+    importGraphPackageFromFile: (file) =>
+      operation(() => graphService.importGraphPackageFromFile(file), true),
+    exportGraph: (name) => operation(() => graphService.exportGraph(name)),
+    getGraphReadme: (name) =>
+      operation(async () => {
+        const epoch = getSessionGeneration();
+        const session = get().editorSession;
+        const result = await graphService.getGraphReadme(name);
+        assertActive(epoch, session);
+        return result;
+      }),
+    generateMCPScript: (name) =>
+      operation(async () => {
+        if (get().currentGraph?.name === name) await get().saveGraph();
+        await graphService.downloadMCPScript(name);
+      }),
+    fetchVersions: async (name) => {
+      const epoch = getSessionGeneration();
+      const session = get().editorSession;
+      const token = ++versionGeneration;
+      set({ loadingVersions: true });
+      try {
+        const result = await graphService.getGraphVersions(name);
+        if (active(epoch, session) && token === versionGeneration)
+          set({ versions: result.versions });
+      } catch (error) {
+        if (active(epoch, session) && token === versionGeneration)
+          set({ error: getErrorMessage(error) });
+        throw error;
+      } finally {
+        if (active(epoch, session) && token === versionGeneration) set({ loadingVersions: false });
       }
-      return node;
-    });
-
-    set({
-      currentGraph: {
-        ...currentGraph,
-        nodes: updatedNodes
-      },
-      dirty: true
-    });
-  },
-
-  removeConnection: (sourceId, targetId) => {
-    const { currentGraph } = get();
-    if (!currentGraph) return;
-
-    const sourceNode = currentGraph.nodes.find(node => node.id === sourceId);
-    const targetNode = currentGraph.nodes.find(node => node.id === targetId);
-
-    if (!sourceNode || !targetNode) return;
-
-    const updatedNodes = currentGraph.nodes.map(node => {
-      if (node.id === sourceId) {
-        // 从源节点的output_nodes中移除
-        return {
-          ...node,
-          output_nodes: node.output_nodes.filter(name => name !== targetNode.name)
-        };
-      } else if (node.id === targetId) {
-        // 从目标节点的input_nodes中移除
-        return {
-          ...node,
-          input_nodes: node.input_nodes.filter(name => name !== sourceNode.name)
-        };
+    },
+    createVersion: (name, message) =>
+      operation(async () => {
+        const epoch = getSessionGeneration();
+        const session = get().editorSession;
+        if (get().currentGraph?.name === name) await get().saveGraph();
+        assertActive(epoch, session);
+        await graphService.createGraphVersion(name, message);
+        assertActive(epoch, session);
+        await get()
+          .fetchVersions(name)
+          .catch(() => {});
+        assertActive(epoch, session);
+      }),
+    loadVersion: async (name, versionId) => {
+      const epoch = getSessionGeneration();
+      const token = ++loadGeneration;
+      set({ loading: true, error: undefined });
+      try {
+        const [version, latest] = await Promise.all([
+          graphService.getGraphVersion(name, versionId),
+          graphService.getGraph(name),
+        ]);
+        if (!isCurrentSession(epoch) || token !== loadGeneration)
+          throw new DOMException('Version load superseded', 'AbortError');
+        replaceEditor(fromBackend(version.config), fromBackend(latest), true);
+      } catch (error) {
+        if (isCurrentSession(epoch) && token === loadGeneration)
+          set({ loading: false, error: getErrorMessage(error) });
+        throw error;
       }
-      return node;
-    });
+    },
+    deleteVersion: (name, versionId) =>
+      operation(async () => {
+        const epoch = getSessionGeneration();
+        const session = get().editorSession;
+        await graphService.deleteGraphVersion(name, versionId);
+        assertActive(epoch, session);
+        await get()
+          .fetchVersions(name)
+          .catch(() => {});
+        assertActive(epoch, session);
+      }),
+  };
+});
 
-    set({
-      currentGraph: {
-        ...currentGraph,
-        nodes: updatedNodes
-      },
-      dirty: true
-    });
-  },
-
-  // 新增功能实现
-  importGraph: async (filePath) => {
-    try {
-      set({ loading: true, error: undefined });
-      const result = await graphService.importGraph(filePath);
-      set({ loading: false });
-      await get().fetchGraphs();
-      return result;
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Import failed'
-      });
-      throw error;
-    }
-  },
-
-  importGraphFromFile: async (file) => {
-    try {
-      set({ loading: true, error: undefined });
-      const result = await graphService.importGraphFromFile(file);
-      set({ loading: false });
-      await get().fetchGraphs();
-      return result;
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Import from file failed'
-      });
-      throw error;
-    }
-  },
-
-  exportGraph: async (graphName) => {
-    try {
-      set({ loading: true, error: undefined });
-      const result = await graphService.exportGraph(graphName);
-      set({ loading: false });
-      return result;
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Export failed'
-      });
-      throw error;
-    }
-  },
-
-  importGraphPackage: async (filePath) => {
-    try {
-      set({ loading: true, error: undefined });
-      const result = await graphService.importGraphPackage(filePath);
-      set({ loading: false });
-      await get().fetchGraphs();
-      return result;
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Import package failed'
-      });
-      throw error;
-    }
-  },
-
-  importGraphPackageFromFile: async (file) => {
-    try {
-      set({ loading: true, error: undefined });
-      const result = await graphService.importGraphPackageFromFile(file);
-      set({ loading: false });
-      await get().fetchGraphs();
-      return result;
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Import package from file failed'
-      });
-      throw error;
-    }
-  },
-
-
-  getGraphReadme: async (graphName) => {
-    try {
-      set({ loading: true, error: undefined });
-      const result = await graphService.getGraphReadme(graphName);
-      set({ loading: false });
-      return result;
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to load README'
-      });
-      throw error;
-    }
-  },
-
-  generateMCPScript: async (graphName) => {
-    try {
-      set({ loading: true, error: undefined });
-
-      const { currentGraph, dirty } = get();
-      if (currentGraph && currentGraph.name === graphName && dirty) {
-        await get().saveGraph();
-      }
-
-      await graphService.downloadMCPScript(graphName);
-      set({ loading: false });
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : `Failed to generate MCP script for ${graphName}`
-      });
-      throw error;
-    }
-  },
-
-  // ======= 版本管理方法 =======
-
-  /**
-   * 获取图的版本列表
-   */
-  fetchVersions: async (graphName) => {
-    try {
-      set({ loadingVersions: true, error: undefined });
-      const result = await graphService.getGraphVersions(graphName);
-      set({
-        versions: result.versions || [],
-        loadingVersions: false
-      });
-    } catch (error) {
-      set({
-        loadingVersions: false,
-        versions: [],
-        error: error instanceof Error ? error.message : '获取版本列表失败'
-      });
-      throw error;
-    }
-  },
-
-  /**
-   * 创建新版本
-   */
-  createVersion: async (graphName, commitMessage) => {
-    try {
-      set({ loading: true, error: undefined });
-
-      // 如果有未保存的更改，先保存
-      const { currentGraph, dirty } = get();
-      if (currentGraph && currentGraph.name === graphName && dirty) {
-        await get().saveGraph();
-      }
-
-      await graphService.createGraphVersion(graphName, commitMessage);
-
-      // 刷新版本列表
-      await get().fetchVersions(graphName);
-
-      set({ loading: false });
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : '创建版本失败'
-      });
-      throw error;
-    }
-  },
-
-  /**
-   * 加载特定版本到编辑器
-   * 注意：加载历史版本后标记为 dirty，因为与 MongoDB 中的最新版本不同
-   */
-  loadVersion: async (graphName, versionId) => {
-    try {
-      set({ loading: true, error: undefined });
-
-      // 获取历史版本配置
-      const result = await graphService.getGraphVersion(graphName, versionId);
-      const graph = convertFromBackendFormat(result.config);
-
-      // 重新加载 MongoDB 中的最新版本作为 originalGraph
-      const latestBackendGraph = await graphService.getGraph(graphName);
-      const originalGraph = convertFromBackendFormat(latestBackendGraph);
-
-      set({
-        currentGraph: graph,
-        originalGraph: originalGraph,  // 保持最新版本作为对比基准
-        loading: false,
-        selectedNode: null,
-        dirty: true  // 标记为未保存，因为历史版本与最新版本不同
-      });
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : '加载版本失败'
-      });
-      throw error;
-    }
-  },
-
-  /**
-   * 删除特定版本
-   */
-  deleteVersion: async (graphName, versionId) => {
-    try {
-      set({ loading: true, error: undefined });
-
-      await graphService.deleteGraphVersion(graphName, versionId);
-
-      // 刷新版本列表
-      await get().fetchVersions(graphName);
-
-      set({ loading: false });
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : '删除版本失败'
-      });
-      throw error;
-    }
-  }
-}));
+registerSessionReset(() => {
+  loadGeneration++;
+  listGeneration++;
+  versionGeneration++;
+  operationGeneration++;
+  positionFlusher = undefined;
+  listRequest = undefined;
+  saveRequest = undefined;
+  useGraphEditorStore.setState((state) => ({
+    ...initialState(),
+    editorSession: state.editorSession + 1,
+  }));
+});

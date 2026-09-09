@@ -1,0 +1,137 @@
+import axios from 'axios';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { clearSession, commitSession, refreshAccessToken, subscribeToSessionStorage } from '../services/authSessionService';
+import { getSessionGeneration } from './authSession';
+import { getRefreshToken, getToken, getUserInfo, isAuthenticated } from './auth';
+const alice = { user_id: 'alice', role: 'user' as const, access_token: 'alice-token', refresh_token: 'alice-refresh', token_type: 'bearer' };
+const bob = { ...alice, user_id: 'bob', access_token: 'bob-token', refresh_token: 'bob-refresh' };
+const quota = () => { throw new DOMException('quota exceeded', 'QuotaExceededError'); };
+const listeners: (() => void)[] = [];
+const subscribe = () => { const cleanup = subscribeToSessionStorage(); listeners.push(cleanup); return cleanup; };
+afterEach(() => { for (const cleanup of listeners.splice(0)) cleanup(); });
+beforeEach(() => { localStorage.clear(); clearSession(); });
+it('authenticates after commit when only storage writes fail', () => {
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(quota);
+  commitSession(alice);
+  expect(localStorage.getItem('auth_token')).toBeNull();
+  expect(isAuthenticated()).toBe(true);
+  expect(getToken()).toBe(alice.access_token);
+  expect(getRefreshToken()).toBe(alice.refresh_token);
+  expect(getUserInfo()?.user_id).toBe('alice');
+});
+it('uses refreshed tokens after failed writes while preserving the current session', async () => {
+  commitSession(alice);
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(quota);
+  vi.spyOn(axios, 'post').mockResolvedValue({ data: { ...alice, access_token: 'refreshed-token', refresh_token: 'refreshed-refresh' } });
+  const generation = getSessionGeneration();
+  await expect(refreshAccessToken(generation)).resolves.toBe('refreshed-token');
+  expect(getToken()).toBe('refreshed-token');
+  expect(getRefreshToken()).toBe('refreshed-refresh');
+  expect(getSessionGeneration()).toBe(generation);
+});
+it.each(['auth_token', 'refresh_token', 'user_info'])('keeps a consistent identity when only %s cannot be saved', key => {
+  commitSession(alice);
+  const setItem = Storage.prototype.setItem;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, name, value) {
+    if (name === key) quota();
+    else setItem.call(this, name, value);
+  });
+  commitSession(bob);
+  expect(getToken()).toBe(bob.access_token);
+  expect(getRefreshToken()).toBe(bob.refresh_token);
+  expect(getUserInfo()?.user_id).toBe('bob');
+});
+it.each(['auth_token', 'refresh_token', 'user_info', 'all'])('keeps logout tombstones when %s removal fails', key => {
+  commitSession(alice);
+  const removeItem = Storage.prototype.removeItem;
+  const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, name) {
+    if (key === 'all' || name === key) quota();
+    else removeItem.call(this, name);
+  });
+  clearSession();
+  remove.mockRestore();
+  expect(isAuthenticated()).toBe(false);
+  expect(getToken()).toBeNull();
+  expect(getRefreshToken()).toBeNull();
+  expect(getUserInfo()).toBeNull();
+});
+it('ignores a queued event for unchanged persistent credentials after a degraded local login', () => {
+  commitSession(alice);
+  const unsubscribe = subscribe();
+  const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(quota);
+  commitSession(bob);
+  const generation = getSessionGeneration();
+  set.mockRestore();
+  window.dispatchEvent(new StorageEvent('storage', { key: 'auth_token' }));
+  expect(getToken()).toBe(bob.access_token);
+  expect(getUserInfo()?.user_id).toBe('bob');
+  expect(getSessionGeneration()).toBe(generation);
+  unsubscribe();
+});
+it('adopts a changed external credential snapshot after degraded local writes', () => {
+  commitSession(alice);
+  const unsubscribe = subscribe();
+  const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(quota);
+  commitSession(bob);
+  const generation = getSessionGeneration();
+  set.mockRestore();
+  localStorage.setItem('auth_token', 'charlie-token');
+  localStorage.setItem('refresh_token', 'charlie-refresh');
+  localStorage.setItem('user_info', JSON.stringify({ user_id: 'charlie', role: 'user' }));
+  window.dispatchEvent(new StorageEvent('storage', { key: 'user_info' }));
+  expect(getToken()).toBe('charlie-token');
+  expect(getRefreshToken()).toBe('charlie-refresh');
+  expect(getUserInfo()?.user_id).toBe('charlie');
+  expect(getSessionGeneration()).toBe(generation + 1);
+  unsubscribe();
+});
+it('accepts a genuine external login after failed logout deletion', () => {
+  commitSession(alice);
+  const unsubscribe = subscribe();
+  const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(quota);
+  clearSession();
+  remove.mockRestore();
+  window.dispatchEvent(new StorageEvent('storage', { key: 'auth_token' }));
+  expect(isAuthenticated()).toBe(false);
+  localStorage.setItem('auth_token', bob.access_token);
+  localStorage.setItem('refresh_token', bob.refresh_token);
+  localStorage.setItem('user_info', JSON.stringify({ user_id: 'bob', role: 'user' }));
+  window.dispatchEvent(new StorageEvent('storage', { key: 'user_info' }));
+  expect(getToken()).toBe(bob.access_token);
+  expect(getUserInfo()?.user_id).toBe('bob');
+  unsubscribe();
+});
+it('keeps normal cross-tab token rotation live without invalidating the session', () => {
+  commitSession(alice);
+  const unsubscribe = subscribe();
+  const generation = getSessionGeneration();
+  localStorage.setItem('auth_token', 'external-token');
+  window.dispatchEvent(new StorageEvent('storage', { key: 'auth_token' }));
+  expect(getToken()).toBe('external-token');
+  expect(getSessionGeneration()).toBe(generation);
+  unsubscribe();
+});
+it('does not revive persistent credentials from a late refresh after failed logout deletion', async () => {
+  commitSession(alice);
+  let resolve!: (value: { data: typeof alice }) => void;
+  vi.spyOn(axios, 'post').mockReturnValue(new Promise(yes => { resolve = yes; }));
+  const refreshing = refreshAccessToken(getSessionGeneration());
+  const rejected = expect(refreshing).rejects.toMatchObject({ name: 'AbortError' });
+  await vi.waitFor(() => expect(axios.post).toHaveBeenCalledOnce());
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(quota);
+  clearSession();
+  resolve({ data: { ...alice, access_token: 'late-token' } });
+  await rejected;
+  expect(getToken()).toBeNull();
+  expect(getRefreshToken()).toBeNull();
+  expect(getUserInfo()).toBeNull();
+});
+it('returns to ordinary persistent reads after a later successful credential commit', () => {
+  const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(quota);
+  commitSession(alice);
+  set.mockRestore();
+  commitSession(bob);
+  expect(getUserInfo()?.user_id).toBe('bob');
+  localStorage.setItem('auth_token', 'external-bob-token');
+  expect(getToken()).toBe('external-bob-token');
+});

@@ -49,7 +49,7 @@ const AgentNodeComponent: React.FC<AgentNodeProps> = ({ data }) => {
     onClick
   } = data;
 
-  const { status } = useMCPStore();
+  const status = useMCPStore(state => state.status);
 
 
 
@@ -413,4 +413,4 @@ const AgentNodeComponent: React.FC<AgentNodeProps> = ({ data }) => {
   );
 };
 
-export default AgentNodeComponent;
+export default React.memo(AgentNodeComponent);

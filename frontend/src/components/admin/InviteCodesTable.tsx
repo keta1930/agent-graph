@@ -15,8 +15,29 @@ interface InviteCodesTableProps {
   onToggleInviteCode: (code: string, isActive: boolean) => void;
   onCopyCode: (code: string) => void;
   onCreateCode: () => void;
-  t: (key: string, params?: any) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
 }
+
+const tableComponents = {
+  body: {
+    row: (props: React.ComponentProps<'tr'>) => (
+      <tr
+        {...props}
+        style={{
+          transition: 'all 0.2s ease',
+          ...props.style
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = 'rgba(250, 248, 245, 0.5)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'transparent';
+        }}
+      />
+    )
+  }
+};
+
 
 /**
  * 邀请码管理表格组件
@@ -32,26 +53,6 @@ const InviteCodesTable: React.FC<InviteCodesTableProps> = ({
   onCreateCode,
   t,
 }) => {
-  // 表格自定义样式组件
-  const tableComponents = {
-    body: {
-      row: (props: any) => (
-        <tr
-          {...props}
-          style={{
-            transition: 'all 0.2s ease',
-            ...props.style
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(250, 248, 245, 0.5)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-          }}
-        />
-      )
-    }
-  };
 
   // 邀请码表格列定义
   const columns = [
@@ -109,7 +110,7 @@ const InviteCodesTable: React.FC<InviteCodesTableProps> = ({
     {
       title: t('pages.adminPanel.inviteCodes.usage'),
       key: 'usage',
-      render: (_: any, record: InviteCode) => (
+      render: (_: unknown, record: InviteCode) => (
         <Text style={{ color: COLORS.textLight, fontSize: '13px', fontWeight: 500 }}>
           {record.current_uses} / {record.max_uses || t('pages.adminPanel.inviteCodes.unlimited')}
         </Text>
@@ -148,7 +149,7 @@ const InviteCodesTable: React.FC<InviteCodesTableProps> = ({
     {
       title: t('pages.adminPanel.inviteCodes.actions'),
       key: 'action',
-      render: (_: any, record: InviteCode) => (
+      render: (_: unknown, record: InviteCode) => (
         <Button
           size="small"
           danger={record.is_active}

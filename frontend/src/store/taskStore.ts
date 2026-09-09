@@ -1,27 +1,17 @@
-// 任务状态管理Store
 import { create } from 'zustand';
 import { taskService } from '../services/taskService';
-import {
-  Task,
-  TaskSummary,
-  TaskCreate,
-  TaskStatus,
-  TaskQueryParams,
-  ScheduledJob
-} from '../types/task';
-
+import type { Task, TaskSummary, TaskCreate, TaskStatus, TaskQueryParams, ScheduledJob, TaskResponse } from '../types/task';
+import { createRequestScope, type RequestContext } from '../services/requestLifecycle';
+import { captureSession, assertSession } from '../services/authSessionService';
+import { registerSessionReset, isCurrentSession } from '../utils/authSession';
+import { getErrorMessage } from '../utils/errors';
 interface TaskStore {
-  // 状态
   tasks: TaskSummary[];
   currentTask: Task | null;
   scheduledJobs: ScheduledJob[];
   loading: boolean;
   error: string | null;
-
-  // 查询参数
   queryParams: TaskQueryParams;
-
-  // 操作
   setQueryParams: (params: Partial<TaskQueryParams>) => void;
   loadTasks: () => Promise<void>;
   loadTask: (taskId: string) => Promise<void>;
@@ -32,211 +22,74 @@ interface TaskStore {
   reloadScheduler: () => Promise<boolean>;
   clearError: () => void;
   clearCurrentTask: () => void;
-
-  // 获取任务的下次运行时间
   getTaskNextRunTime: (taskId: string) => string | null;
 }
-
-export const useTaskStore = create<TaskStore>((set, get) => ({
-  // 初始状态
-  tasks: [],
-  currentTask: null,
-  scheduledJobs: [],
-  loading: false,
-  error: null,
-  queryParams: {
-    limit: 20,
-    offset: 0,
-    sort_by: 'created_at',
-    sort_order: 'desc'
-  },
-
-  // 设置查询参数
-  setQueryParams: (params) => {
-    set(state => ({
-      queryParams: { ...state.queryParams, ...params }
-    }));
-  },
-
-  // 加载任务列表
-  loadTasks: async () => {
-    set({ loading: true, error: null });
+const listRequest = createRequestScope(), detailRequest = createRequestScope(), jobsRequest = createRequestScope();
+const busy = new Set<symbol>();
+const initialState = () => ({ tasks: [], currentTask: null, scheduledJobs: [], loading: false, error: null, queryParams: { limit: 20, offset: 0, sort_by: 'created_at', sort_order: 'desc' as const } });
+export const useTaskStore = create<TaskStore>((set, get) => {
+  const begin = (signal?: AbortSignal) => {
+    const { generation } = captureSession();
+    const token = Symbol(); busy.add(token); set({ loading: true, error: null });
+    const finish = () => {
+      signal?.removeEventListener('abort', finish);
+      if (isCurrentSession(generation) && busy.delete(token)) set({ loading: busy.size > 0 });
+    };
+    signal?.addEventListener('abort', finish, { once: true });
+    return finish;
+  };
+  const read = async (context: RequestContext, operation: () => Promise<Partial<TaskStore>>) => {
+    const finish = begin(context.signal);
+    try { const state = await operation(); if (context.isCurrent()) set(state); }
+    catch (error) { if (context.isCurrent()) set({ error: getErrorMessage(error) }); }
+    finally { finish(); }
+  };
+  const mutate = async (operation: () => Promise<TaskResponse>, apply: () => Promise<void> | void) => {
+    const { generation } = captureSession(); const finish = begin();
     try {
-      const { queryParams } = get();
-      const tasks = await taskService.getTaskSummaries(queryParams);
-      set({ tasks, loading: false });
-    } catch (error: any) {
-      set({
-        error: error.response?.data?.detail || '加载任务列表失败',
-        loading: false
+      const response = await operation(); assertSession(generation);
+      if (response.status !== 'success') throw new Error(response.message);
+      listRequest.invalidate();
+      await apply();
+      return response;
+    } catch (error) { if (isCurrentSession(generation)) set({ error: getErrorMessage(error) }); throw error; }
+    finally { finish(); }
+  };
+  return {
+    ...initialState(),
+    setQueryParams: params => { listRequest.invalidate(); detailRequest.invalidate(); set(state => ({ queryParams: { ...state.queryParams, ...params } })); },
+    loadTasks: () => {
+      const query = { ...get().queryParams };
+      const key = JSON.stringify(Object.entries(query).sort(([a], [b]) => a.localeCompare(b)));
+      return listRequest.run(key, context => read(context, async () => ({ tasks: await taskService.getTaskSummaries(query, { signal: context.signal }) })));
+    },
+    loadTask: id => detailRequest.run(id, context => read(context, async () => ({ currentTask: await taskService.getTask(id, { signal: context.signal }) }))),
+    createTask: async data => {
+      const result = await mutate(() => taskService.createTask(data), () => get().loadTasks());
+      return { success: true, taskId: result.data?.task_id, message: result.message };
+    },
+    updateTaskStatus: async (id, status) => {
+      await mutate(() => taskService.updateTaskStatus(id, { status }), () => {
+        if (get().currentTask?.id === id) detailRequest.invalidate();
+        set(state => ({ tasks: state.tasks.map(task => task.id === id ? { ...task, status } : task), currentTask: state.currentTask?.id === id ? { ...state.currentTask, status } : state.currentTask }));
       });
-    }
-  },
-
-  // 加载单个任务详情
-  loadTask: async (taskId: string) => {
-    set({ loading: true, error: null });
-    try {
-      const task = await taskService.getTask(taskId);
-      set({ currentTask: task, loading: false });
-    } catch (error: any) {
-      set({
-        error: error.response?.data?.detail || '加载任务详情失败',
-        loading: false
+      return true;
+    },
+    deleteTask: async id => {
+      await mutate(() => taskService.deleteTask(id), () => {
+        if (get().currentTask?.id === id) get().clearCurrentTask();
+        set(state => ({ tasks: state.tasks.filter(task => task.id !== id) }));
       });
-    }
-  },
-
-  // 创建任务
-  createTask: async (taskData: TaskCreate) => {
-    set({ loading: true, error: null });
-    try {
-      const response = await taskService.createTask(taskData);
-      if (response.status === 'success') {
-        // 重新加载任务列表
-        await get().loadTasks();
-        set({ loading: false });
-        return {
-          success: true,
-          taskId: response.data?.task_id,
-          message: response.message
-        };
-      } else {
-        set({
-          error: response.message || '创建任务失败',
-          loading: false
-        });
-        return { success: false, message: response.message };
-      }
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || '创建任务失败';
-      set({ error: errorMessage, loading: false });
-      return { success: false, message: errorMessage };
-    }
-  },
-
-  // 更新任务状态
-  updateTaskStatus: async (taskId: string, status: TaskStatus) => {
-    set({ loading: true, error: null });
-    try {
-      const response = await taskService.updateTaskStatus(taskId, { status });
-      if (response.status === 'success') {
-        // 更新本地状态
-        set(state => ({
-          tasks: state.tasks.map(task =>
-            task.id === taskId ? { ...task, status } : task
-          ),
-          loading: false
-        }));
-
-        // 如果当前任务是被更新的任务，也更新当前任务
-        const { currentTask } = get();
-        if (currentTask?.id === taskId) {
-          set({ currentTask: { ...currentTask, status } });
-        }
-
-        return true;
-      } else {
-        set({
-          error: response.message || '更新任务状态失败',
-          loading: false
-        });
-        return false;
-      }
-    } catch (error: any) {
-      set({
-        error: error.response?.data?.detail || '更新任务状态失败',
-        loading: false
-      });
-      return false;
-    }
-  },
-
-  // 删除任务
-  deleteTask: async (taskId: string) => {
-    set({ loading: true, error: null });
-    try {
-      const response = await taskService.deleteTask(taskId);
-      if (response.status === 'success') {
-        // 从本地状态移除
-        set(state => ({
-          tasks: state.tasks.filter(task => task.id !== taskId),
-          loading: false
-        }));
-
-        // 如果删除的是当前任务，清除当前任务
-        const { currentTask } = get();
-        if (currentTask?.id === taskId) {
-          set({ currentTask: null });
-        }
-
-        return true;
-      } else {
-        set({
-          error: response.message || '删除任务失败',
-          loading: false
-        });
-        return false;
-      }
-    } catch (error: any) {
-      set({
-        error: error.response?.data?.detail || '删除任务失败',
-        loading: false
-      });
-      return false;
-    }
-  },
-
-  // 加载调度器中的任务
-  loadScheduledJobs: async () => {
-    try {
-      const jobs = await taskService.getScheduledJobs();
-      set({ scheduledJobs: jobs });
-    } catch (error: any) {
-      set({ error: error.response?.data?.detail || '加载调度任务失败' });
-    }
-  },
-
-  // 重新加载调度器
-  reloadScheduler: async () => {
-    set({ loading: true, error: null });
-    try {
-      const response = await taskService.reloadScheduler();
-      if (response.status === 'success') {
-        // 重新加载调度任务列表
-        await get().loadScheduledJobs();
-        set({ loading: false });
-        return true;
-      } else {
-        set({
-          error: response.message || '重新加载调度器失败',
-          loading: false
-        });
-        return false;
-      }
-    } catch (error: any) {
-      set({
-        error: error.response?.data?.detail || '重新加载调度器失败',
-        loading: false
-      });
-      return false;
-    }
-  },
-
-  // 清除错误
-  clearError: () => {
-    set({ error: null });
-  },
-
-  // 清除当前任务
-  clearCurrentTask: () => {
-    set({ currentTask: null });
-  },
-
-  // 获取任务的下次运行时间
-  getTaskNextRunTime: (taskId: string) => {
-    const { scheduledJobs } = get();
-    const job = scheduledJobs.find(job => job.id === taskId);
-    return job?.next_run_time || null;
-  }
-}));
+      return true;
+    },
+    loadScheduledJobs: () => jobsRequest.run('jobs', context => read(context, async () => ({ scheduledJobs: await taskService.getScheduledJobs({ signal: context.signal }) }))),
+    reloadScheduler: async () => {
+      await mutate(() => taskService.reloadScheduler(), () => { jobsRequest.invalidate(); return get().loadScheduledJobs(); });
+      return true;
+    },
+    clearError: () => set({ error: null }),
+    clearCurrentTask: () => { detailRequest.invalidate(); set({ currentTask: null }); },
+    getTaskNextRunTime: id => get().scheduledJobs.find(job => job.id === id)?.next_run_time ?? null,
+  };
+});
+registerSessionReset(() => { listRequest.invalidate(); detailRequest.invalidate(); jobsRequest.invalidate(); busy.clear(); useTaskStore.setState(initialState()); });

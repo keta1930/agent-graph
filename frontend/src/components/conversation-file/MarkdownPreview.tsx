@@ -1,3 +1,4 @@
+import MarkdownCode from '../common/MarkdownCode';
 import React, { useState } from 'react';
 import { Input, Button, Space } from 'antd';
 import { Edit, Eye, Save, Columns2 } from 'lucide-react';
@@ -5,8 +6,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import 'katex/dist/katex.min.css';
 import { useT } from '../../i18n/hooks';
 
@@ -22,7 +21,6 @@ interface MarkdownPreviewProps {
 }
 
 const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
-  filename,
   content,
   onChange,
   onSave,
@@ -37,7 +35,7 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
     // Ctrl+S / Cmd+S to save
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
-      if (onSave && isDirty) {
+      if (onSave && isDirty && !readOnly) {
         onSave();
       }
     }
@@ -50,24 +48,8 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
         components={{
-          code({ node, inline, className, children, ...props }: any) {
-            const match = /language-(\w+)/.exec(className || '');
-            return !inline && match ? (
-              <SyntaxHighlighter
-                style={vscDarkPlus}
-                language={match[1]}
-                PreTag="div"
-                {...props}
-              >
-                {String(children).replace(/\n$/, '')}
-              </SyntaxHighlighter>
-            ) : (
-              <code className={className} {...props}>
-                {children}
-              </code>
-            );
-          },
-          table({ children, ...props }: any) {
+          pre: MarkdownCode,
+          table({ children }) {
             return (
               <div style={{ overflowX: 'auto', marginBottom: '16px' }}>
                 <table
@@ -76,14 +58,13 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
                     width: '100%',
                     marginBottom: '16px',
                   }}
-                  {...props}
                 >
                   {children}
                 </table>
               </div>
             );
           },
-          th({ children, ...props }: any) {
+          th({ children }) {
             return (
               <th
                 style={{
@@ -92,20 +73,18 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
                   background: '#f5f5f5',
                   textAlign: 'left',
                 }}
-                {...props}
               >
                 {children}
               </th>
             );
           },
-          td({ children, ...props }: any) {
+          td({ children }) {
             return (
               <td
                 style={{
                   border: '1px solid #ddd',
                   padding: '8px',
                 }}
-                {...props}
               >
                 {children}
               </td>

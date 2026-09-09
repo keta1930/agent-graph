@@ -2,9 +2,7 @@
 import React, { useState } from 'react';
 import { Typography, Tag } from 'antd';
 import { Bot, ChevronDown, ChevronRight } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import GlassCodeBlock from './GlassCodeBlock';
+import SmartMarkdown from './SmartMarkdown';
 import { useT } from '../../../i18n/hooks';
 
 const { Text } = Typography;
@@ -75,36 +73,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ content }) => {
           scrollbarColor: 'rgba(139, 115, 85, 0.3) rgba(245, 243, 240, 0.6)'
         }} className="reasoning-scrollbar">
           <div style={{ marginTop: '12px' }}>
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                code({ node, ...codeProps }) {
-                  const { children: codeChildren, className: codeClassName, ...restProps } = codeProps;
-                  const match = /language-(\w+)/.exec(codeClassName || '');
-                  const language = match ? match[1] : '';
-                  const inline = !match;
-
-                  return !inline ? (
-                    <GlassCodeBlock language={language}>
-                      {String(codeChildren).replace(/\n$/, '')}
-                    </GlassCodeBlock>
-                  ) : (
-                    <code style={{
-                      background: 'rgba(139, 115, 85, 0.08)',
-                      padding: '2px 6px',
-                      borderRadius: '3px',
-                      fontSize: '0.9em',
-                      fontFamily: "'SF Mono', monospace",
-                      color: '#b85845'
-                    }} {...restProps}>
-                      {codeChildren}
-                    </code>
-                  );
-                }
-              }}
-            >
-              {content}
-            </ReactMarkdown>
+            <SmartMarkdown content={content} />
           </div>
         </div>
       )}
@@ -112,4 +81,4 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ content }) => {
   );
 };
 
-export default ReasoningDisplay;
+export default React.memo(ReasoningDisplay);

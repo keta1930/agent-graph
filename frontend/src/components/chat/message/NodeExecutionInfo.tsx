@@ -25,7 +25,6 @@ interface NodeExecutionInfoProps {
 const NodeExecutionInfo: React.FC<NodeExecutionInfoProps> = ({
   nodeName,
   level,
-  outputEnabled,
   mcpServers,
   status
 }) => {

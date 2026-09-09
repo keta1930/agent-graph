@@ -1,12 +1,16 @@
 // 图JSON编辑器组件
-import React, { useState, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { useState, useImperativeHandle, forwardRef } from 'react';
 import { Alert } from 'antd';
 import { AlertTriangle, Paintbrush } from 'lucide-react';
 import Editor from "@monaco-editor/react";
+import { parseGraphConfig } from '../../utils/graphEditorModel';
+import { getErrorMessage } from '../../utils/errors';
 import { BackendGraphConfig } from '../../types/graph';
 
 interface GraphJsonEditorProps {
   graphConfig: BackendGraphConfig;
+  value?: string;
+  onChange?: (text: string) => void;
 }
 
 export interface GraphJsonEditorHandle {
@@ -19,80 +23,26 @@ export interface GraphJsonEditorHandle {
  * 不进行实时验证和同步，用户可以自由编辑
  */
 const GraphJsonEditor = forwardRef<GraphJsonEditorHandle, GraphJsonEditorProps>(({
-  graphConfig
+  graphConfig, value, onChange
 }, ref) => {
-  const [jsonText, setJsonText] = useState('');
+  const [localText, setLocalText] = useState(() => JSON.stringify(graphConfig, null, 2));
+  const jsonText = value ?? localText;
   const [syntaxError, setSyntaxError] = useState<string | null>(null);
-  const [editorInstance, setEditorInstance] = useState<any>(null);
-
-  // 初始化JSON文本（仅在graphConfig变化时）
-  useEffect(() => {
-    try {
-      const formatted = JSON.stringify(graphConfig, null, 2);
-      setJsonText(formatted);
-      setSyntaxError(null);
-    } catch {
-      setSyntaxError('Failed to serialize graph configuration');
-    }
-  }, [graphConfig]);
-
-  // JSON文本变化处理 - 仅做轻量级语法检查
-  const handleJsonTextChange = (value: string | undefined) => {
-    const newValue = value || '';
-    setJsonText(newValue);
-
-    // 轻量级语法检查（不阻止编辑）
-    try {
-      JSON.parse(newValue);
-      setSyntaxError(null);
-    } catch {
-      // 不设置错误，Monaco会自动显示语法错误标记
-      setSyntaxError(null);
-    }
+  const handleJsonTextChange = (text: string | undefined) => {
+    const next = text ?? '';
+    setLocalText(next);
+    onChange?.(next);
+    setSyntaxError(null);
   };
-
-  // 格式化JSON
   const formatJson = () => {
-    try {
-      const parsed = JSON.parse(jsonText);
-      const formatted = JSON.stringify(parsed, null, 2);
-      setJsonText(formatted);
-      setSyntaxError(null);
-
-      // 更新编辑器内容
-      if (editorInstance) {
-        editorInstance.setValue(formatted);
-      }
-    } catch (err) {
-      setSyntaxError('Cannot format invalid JSON syntax');
-    }
+    try { handleJsonTextChange(JSON.stringify(JSON.parse(jsonText), null, 2)); }
+    catch { setSyntaxError('Cannot format invalid JSON syntax'); }
   };
-
-  // 暴露方法给父组件
   useImperativeHandle(ref, () => ({
     getJsonText: () => jsonText,
-
     validateAndGetConfig: () => {
-      try {
-        const parsed = JSON.parse(jsonText);
-
-        // 验证必需字段
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          return { valid: false, error: 'Configuration must be an object' };
-        }
-
-        if (!parsed.name || typeof parsed.name !== 'string') {
-          return { valid: false, error: 'Missing or invalid "name" field' };
-        }
-
-        if (!Array.isArray(parsed.nodes)) {
-          return { valid: false, error: 'Missing or invalid "nodes" field (must be an array)' };
-        }
-
-        return { valid: true, config: parsed as BackendGraphConfig };
-      } catch (err) {
-        return { valid: false, error: 'Invalid JSON syntax' };
-      }
+      try { return { valid: true, config: parseGraphConfig(JSON.parse(jsonText)) }; }
+      catch (error) { return { valid: false, error: getErrorMessage(error, 'Invalid JSON syntax') }; }
     }
   }));
 
@@ -136,8 +86,7 @@ const GraphJsonEditor = forwardRef<GraphJsonEditorHandle, GraphJsonEditorProps>(
         defaultLanguage="json"
         value={jsonText}
         onChange={handleJsonTextChange}
-        onMount={(editor, monaco) => {
-          setEditorInstance(editor);
+        onMount={(_editor, monaco) => {
 
           // 定义与MCP编辑器相同的主题
           monaco.editor.defineTheme('graph-editor-theme', {

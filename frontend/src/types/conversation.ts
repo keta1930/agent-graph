@@ -1,4 +1,4 @@
-// src/types/conversation.ts
+import type { JsonObject } from './json';
 
 export interface ConversationMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
@@ -26,7 +26,7 @@ export interface ConversationRound {
   model?: string; // 使用的模型
   prompt_tokens?: number; // 输入 token 数
   completion_tokens?: number; // 输出 token 数
-  tools?: any[]; // 工具 schema
+  tools?: JsonObject[]; // 工具 schema
   node_name?: string; // For graph execution
   level?: number; // For graph execution
   output_enabled?: string; // For graph execution
@@ -85,7 +85,7 @@ export interface ParsedResults {
   todo?: string;
   graph_name?: string;
   graph_description?: string;
-  nodes?: any[];
+  nodes?: JsonObject[];
   end_template?: string;
   folder_name?: string;
   script_files?: Record<string, string>;
@@ -203,6 +203,23 @@ export interface ConversationUpdateRequest {
 // 对话模式：只保留 agent 和 graph
 export type ConversationMode = 'agent' | 'graph';
 
+export interface ChatSubmitOptions extends Omit<AgentRunRequest, 'user_prompt'> {
+  mode?: ConversationMode;
+  user_prompt?: string;
+  graph_name?: string;
+  continue_from_checkpoint?: boolean;
+}
+
+export interface ChatInputConfig {
+  selectedModel?: string;
+  selectedGraph?: string;
+  systemPrompt?: string;
+  selectedMCPServers?: string[];
+  selectedAgent?: string | null;
+  selectedSystemTools?: string[];
+  maxIterations?: number | null;
+}
+
 // 流式输出块类型
 export type StreamingBlockType = 'reasoning' | 'content' | 'tool_calls' | 'node_start' | 'task';
 
@@ -255,6 +272,7 @@ export interface TaskRoundData {
 
 // 增强的流式状态，支持分块渲染
 export interface EnhancedStreamingState {
+  status?: 'idle' | 'connecting' | 'streaming' | 'completed' | 'error' | 'aborted';
   isStreaming: boolean;
   blocks: StreamingBlock[];
   error: string | null;

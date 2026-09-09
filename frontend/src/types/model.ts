@@ -1,9 +1,10 @@
+import type { JsonObject } from './json';
 // src/types/model.ts
 export interface ModelConfig {
   // 必填参数
   name: string;
   base_url: string;
-  api_key: string;
+  api_key?: string;
   model: string;
 
   // 提供商和模型类型
@@ -23,11 +24,10 @@ export interface ModelConfig {
   seed?: number;
   logprobs?: boolean;
   top_logprobs?: number;
-  extra_body?: Record<string, any>;
+  extra_body?: JsonObject;
   extra_headers?: Record<string, string>;
   timeout?: number;
 
-  [key: string]: any;
 }
 
 export interface ModelList {

@@ -1,6 +1,6 @@
-import React, { useRef, useEffect } from 'react';
-import Editor from '@monaco-editor/react';
-import { Spin, message } from 'antd';
+import React, { useRef, useCallback } from 'react';
+import Editor, { type OnMount } from '@monaco-editor/react';
+import { Spin } from 'antd';
 import { getLanguageFromExtension, getFileExtension } from '../../utils/fileUtils';
 import { useT } from '../../i18n/hooks';
 
@@ -24,15 +24,15 @@ const FileEditor: React.FC<FileEditorProps> = ({
   readOnly = false,
 }) => {
   const t = useT();
-  const editorRef = useRef<any>(null);
+  const latest = useRef({ onSave, isDirty, readOnly });
+  latest.current = { onSave, isDirty, readOnly };
 
   // Get language based on file extension
   const extension = getFileExtension(filename);
   const language = getLanguageFromExtension(extension);
 
   // Handle editor mount
-  const handleEditorDidMount = (editor: any, monaco: any) => {
-    editorRef.current = editor;
+  const handleEditorDidMount = useCallback<OnMount>((editor, monaco) => {
 
     // Define custom theme with 06 style colors
     monaco.editor.defineTheme('wabi-sabi', {
@@ -66,8 +66,8 @@ const FileEditor: React.FC<FileEditorProps> = ({
 
     // Add keyboard shortcut for save (Ctrl+S / Cmd+S)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      if (onSave && isDirty) {
-        onSave();
+      if (latest.current.isDirty && !latest.current.readOnly) {
+        latest.current.onSave?.();
       }
     });
 
@@ -76,7 +76,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
       minimap: { enabled: true },
       fontSize: 14,
       lineNumbers: 'on',
-      readOnly: readOnly,
+      readOnly: latest.current.readOnly,
       scrollBeyondLastLine: false,
       automaticLayout: true,
       tabSize: 2,
@@ -84,7 +84,7 @@ const FileEditor: React.FC<FileEditorProps> = ({
       wrappingIndent: 'indent',
       padding: { top: 16, bottom: 16 },
     });
-  };
+  }, []);
 
   // Handle content change
   const handleEditorChange = (value: string | undefined) => {

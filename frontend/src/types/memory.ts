@@ -1,3 +1,4 @@
+import type { JsonObject } from './json';
 // src/types/memory.ts
 
 // 记忆条目
@@ -52,7 +53,7 @@ export interface ImportMemoryRequest {
 export interface MemoryResponse {
   status: 'success' | 'error';
   message?: string;
-  data?: any;
+  data?: JsonObject;
   error_code?: string;
 }
 

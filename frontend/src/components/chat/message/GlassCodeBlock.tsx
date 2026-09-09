@@ -2,24 +2,10 @@
 import React, { useState, useEffect } from 'react';
 import { message } from 'antd';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import CodeHighlighter from '../../common/CodeHighlighter';
 import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
 import CodeBlockPreview from '../../common/CodeBlockPreview';
 import { useT } from '../../../i18n/hooks';
-
-// 自定义语法高亮主题 - 移除背景色，保留其他样式
-const customCodeStyle = {
-  ...oneLight,
-  'code[class*="language-"]': {
-    ...oneLight['code[class*="language-"]'],
-    background: 'transparent'
-  },
-  'pre[class*="language-"]': {
-    ...oneLight['pre[class*="language-"]'],
-    background: 'transparent'
-  }
-};
 
 interface GlassCodeBlockProps {
   language?: string;
@@ -44,6 +30,16 @@ const GlassCodeBlock: React.FC<GlassCodeBlockProps> = ({
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const copyButtonRef = React.useRef<HTMLDivElement>(null);
+  const copyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = React.useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
   const [lockAtBottom, setLockAtBottom] = useState(true);
 
@@ -64,9 +60,11 @@ const GlassCodeBlock: React.FC<GlassCodeBlockProps> = ({
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(children);
+      if (!mountedRef.current) return;
       setCopied(true);
       message.success(t('pages.chatSystem.messageDisplay.codeCopied'));
-      setTimeout(() => {
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => {
         setCopied(false);
         // 清除可能残留的内联样式
         if (copyButtonRef.current) {
@@ -74,13 +72,13 @@ const GlassCodeBlock: React.FC<GlassCodeBlockProps> = ({
           copyButtonRef.current.style.background = '';
         }
       }, 500);
-    } catch (err) {
-      message.error(t('pages.chatSystem.messageDisplay.copyFailed'));
+    } catch {
+      if (mountedRef.current) message.error(t('pages.chatSystem.messageDisplay.copyFailed'));
     }
   };
 
   return (
-    <div style={{
+    <div className={className} style={{
       margin: '12px 0',
       borderRadius: '6px',
       background: 'rgba(255, 255, 255, 1)',
@@ -174,25 +172,11 @@ const GlassCodeBlock: React.FC<GlassCodeBlockProps> = ({
           }}
           className="code-block-scrollbar"
         >
-          <SyntaxHighlighter
-            language={language || 'text'}
-            style={customCodeStyle as any}
-            PreTag="div"
-            customStyle={{
-              background: 'rgba(255, 255, 255, 1)',
-              margin: 0,
-              padding: '14px 16px',
-              fontSize: '13px',
-              lineHeight: '1.6',
-              fontFamily: "'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace"
-            } as any}
-          >
-            {children}
-          </SyntaxHighlighter>
+          <CodeHighlighter language={language} code={children} />
         </div>
       )}
     </div>
   );
 };
 
-export default GlassCodeBlock;
+export default React.memo(GlassCodeBlock);

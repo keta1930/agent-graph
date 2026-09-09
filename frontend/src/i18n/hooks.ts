@@ -1,4 +1,4 @@
-import { useI18n } from './I18nContext';
+import { useI18n } from './context';
 
 /**
  * 获取翻译函数和当前语言的 Hook

@@ -23,16 +23,14 @@ const TaskManager: React.FC = () => {
   const t = useT();
   const [createModalVisible, setCreateModalVisible] = useState(false);
 
-  const {
-    tasks,
-    scheduledJobs,
-    loading,
-    error,
-    loadTasks,
-    loadScheduledJobs,
-    reloadScheduler,
-    clearError
-  } = useTaskStore();
+  const tasks = useTaskStore(state => state.tasks);
+  const scheduledJobs = useTaskStore(state => state.scheduledJobs);
+  const loading = useTaskStore(state => state.loading);
+  const error = useTaskStore(state => state.error);
+  const loadTasks = useTaskStore(state => state.loadTasks);
+  const loadScheduledJobs = useTaskStore(state => state.loadScheduledJobs);
+  const reloadScheduler = useTaskStore(state => state.reloadScheduler);
+  const clearError = useTaskStore(state => state.clearError);
 
   useEffect(() => {
     loadTasks();
@@ -51,16 +49,14 @@ const TaskManager: React.FC = () => {
   }, [tasks, scheduledJobs]);
 
   const handleReloadScheduler = async () => {
-    const success = await reloadScheduler();
-    if (success) {
+    try {
+      await reloadScheduler();
       message.success(t('pages.taskManager.schedulerReloadSuccess'));
-    }
+    } catch { /* store.error 由页面 Alert 展示。 */ }
   };
 
   const handleCreateSuccess = () => {
-    message.success(t('pages.taskManager.taskCreateSuccess'));
-    loadTasks();
-    loadScheduledJobs();
+    void loadScheduledJobs();
   };
 
   return (

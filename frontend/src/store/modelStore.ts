@@ -1,76 +1,53 @@
-// src/store/modelStore.ts
 import { create } from 'zustand';
-import { ModelConfig } from '../types/model';
+import type { ModelConfig } from '../types/model';
 import * as modelService from '../services/modelService';
-
+import { createRequestScope } from '../services/requestLifecycle';
+import { assertSession, captureSession } from '../services/authSessionService';
+import { isCurrentSession, registerSessionReset } from '../utils/authSession';
+import { getErrorMessage } from '../utils/errors';
 interface ModelState {
   models: ModelConfig[];
   loading: boolean;
   error?: string;
-
   fetchModels: () => Promise<void>;
   addModel: (model: ModelConfig) => Promise<void>;
   updateModel: (modelName: string, model: ModelConfig) => Promise<void>;
   deleteModel: (modelName: string) => Promise<void>;
 }
-
-export const useModelStore = create<ModelState>((set) => ({
-  models: [],
-  loading: false,
-  error: undefined,
-
-  fetchModels: async () => {
+const request = createRequestScope();
+let mutations = 0;
+export const useModelStore = create<ModelState>((set, get) => {
+  const mutate = async (operation: () => Promise<unknown>) => {
+    const { generation } = captureSession();
+    mutations += 1;
+    request.invalidate();
+    set({ loading: true, error: undefined });
     try {
-      set({ loading: true, error: undefined });
-      const models = await modelService.getModels();
-      set({ models, loading: false });
+      await operation();
+      assertSession(generation);
+      request.invalidate();
+      await get().fetchModels();
     } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch models'
-      });
+      if (isCurrentSession(generation)) set({ error: getErrorMessage(error) });
+      throw error;
+    } finally {
+      if (isCurrentSession(generation)) { mutations -= 1; set({ loading: mutations > 0 }); }
     }
-  },
-
-  addModel: async (model) => {
-    try {
+  };
+  return {
+    models: [], loading: false, error: undefined,
+    fetchModels: () => request.run('all', async context => {
       set({ loading: true, error: undefined });
-      await modelService.addModel(model);
-      const models = await modelService.getModels();
-      set({ models, loading: false });
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to add model'
-      });
-    }
-  },
-
-  updateModel: async (modelName, model) => {
-    try {
-      set({ loading: true, error: undefined });
-      await modelService.updateModel(modelName, model);
-      const models = await modelService.getModels();
-      set({ models, loading: false });
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to update model'
-      });
-    }
-  },
-
-  deleteModel: async (modelName) => {
-    try {
-      set({ loading: true, error: undefined });
-      await modelService.deleteModel(modelName);
-      const models = await modelService.getModels();
-      set({ models, loading: false });
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to delete model'
-      });
-    }
-  },
-}));
+      try {
+        const models = await modelService.getModels({ signal: context.signal });
+        if (context.isCurrent()) set({ models });
+      } catch (error) {
+        if (context.isCurrent()) set({ error: getErrorMessage(error, 'Failed to fetch models') });
+      } finally { if (context.isCurrent()) set({ loading: mutations > 0 }); }
+    }),
+    addModel: model => mutate(() => modelService.addModel(model)),
+    updateModel: (name, model) => mutate(() => modelService.updateModel(name, model)),
+    deleteModel: name => mutate(() => modelService.deleteModel(name)),
+  };
+});
+registerSessionReset(() => { request.invalidate(); mutations = 0; useModelStore.setState({ models: [], loading: false, error: undefined }); });

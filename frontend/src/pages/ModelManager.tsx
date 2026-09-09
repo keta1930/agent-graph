@@ -1,5 +1,5 @@
 // src/pages/ModelManager.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Layout, Button, Select, Card, Row, Col, Typography, Input, Space, Tag as AntTag, Spin, App, Popconfirm, Tooltip } from 'antd';
 import { Plus, Star, Edit, Trash2, Server, Globe, Tag, Search as SearchIcon, Settings } from 'lucide-react';
 import { useModelStore } from '../store/modelStore';
@@ -16,7 +16,14 @@ const { Text, Title } = Typography;
 const ModelManager: React.FC = () => {
   const t = useT();
   const { message } = App.useApp();
-  const { models, loading, error, fetchModels, addModel, updateModel, deleteModel } = useModelStore();
+  const models = useModelStore(state => state.models);
+  const loading = useModelStore(state => state.loading);
+  const error = useModelStore(state => state.error);
+  const fetchModels = useModelStore(state => state.fetchModels);
+  const addModel = useModelStore(state => state.addModel);
+  const updateModel = useModelStore(state => state.updateModel);
+  const deleteModel = useModelStore(state => state.deleteModel);
+  const formSession = useRef(0);
   const [modalVisible, setModalVisible] = useState(false);
   const [currentModel, setCurrentModel] = useState<ModelConfig | undefined>(undefined);
   const [modalTitle, setModalTitle] = useState(t('pages.modelManager.createModel'));
@@ -24,35 +31,19 @@ const ModelManager: React.FC = () => {
   const [titleModelLoading, setTitleModelLoading] = useState(false);
   const [titleModelModalVisible, setTitleModelModalVisible] = useState(false);
   const [searchText, setSearchText] = useState('');
-  const [filteredModels, setFilteredModels] = useState<ModelConfig[]>([]);
+
 
   useEffect(() => {
     fetchModels();
-    loadTitleGenerationModel();
+    let active = true;
+    void userSettingsService.getTitleGenerationModel().then(config => { if (active) setTitleGenerationModel(config.model_name); }).catch(() => {});
+    return () => { active = false; formSession.current += 1; };
   }, [fetchModels]);
 
-  useEffect(() => {
-    if (!searchText.trim()) {
-      setFilteredModels(models);
-    } else {
-      const keyword = searchText.toLowerCase();
-      const filtered = models.filter(model =>
-        model.name.toLowerCase().includes(keyword) ||
-        model.base_url.toLowerCase().includes(keyword) ||
-        model.model.toLowerCase().includes(keyword)
-      );
-      setFilteredModels(filtered);
-    }
+  const filteredModels = useMemo(() => {
+    const keyword = searchText.trim().toLowerCase();
+    return models.filter(model => [model.name, model.base_url, model.model].some(value => value.toLowerCase().includes(keyword)));
   }, [models, searchText]);
-
-  const loadTitleGenerationModel = async () => {
-    try {
-      const config = await userSettingsService.getTitleGenerationModel();
-      setTitleGenerationModel(config.model_name);
-    } catch (error) {
-      console.error('加载标题生成模型配置失败:', error);
-    }
-  };
 
   const handleTitleModelChange = async (modelName: string | null) => {
     if (!modelName) {
@@ -74,45 +65,50 @@ const ModelManager: React.FC = () => {
   };
 
   const showAddModal = () => {
+    formSession.current += 1;
     setCurrentModel(undefined);
     setModalTitle(t('pages.modelManager.createModel'));
     setModalVisible(true);
   };
 
   const showEditModal = async (model: ModelConfig) => {
+    const owner = ++formSession.current;
     try {
       // 获取完整的模型配置用于编辑
       const response = await modelService.getModelForEdit(model.name);
-      if (response.status === 'success') {
-        setCurrentModel(response.data);
-      } else {
-        // 如果获取失败，使用基本信息
-        console.warn(t('pages.modelManager.titleModelLoadWarning'));
-        setCurrentModel(model);
-      }
+      if (owner !== formSession.current) return;
+      setCurrentModel(response);
     } catch (error) {
       // 如果获取完整配置失败，使用基本信息
+      if (owner !== formSession.current) return;
       console.warn(t('pages.modelManager.titleModelLoadWarning'), error);
       setCurrentModel(model);
       message.warning(t('pages.modelManager.titleModelLoadWarning'));
     } finally {
-      setModalTitle(t('common.edit'));
-      setModalVisible(true);
+      if (owner === formSession.current) {
+        setModalTitle(t('common.edit'));
+        setModalVisible(true);
+      }
     }
   };
 
   const handleFormSubmit = async (formData: ModelConfig) => {
+    const owner = formSession.current;
     try {
       if (currentModel) {
         await updateModel(currentModel.name, formData);
+        if (owner !== formSession.current) return;
         message.success(t('pages.modelManager.updateSuccess', { name: formData.name }));
       } else {
         await addModel(formData);
+        if (owner !== formSession.current) return;
         message.success(t('pages.modelManager.addSuccess', { name: formData.name }));
       }
       setModalVisible(false);
     } catch (err) {
+      if (owner !== formSession.current) throw err;
       message.error(t('pages.modelManager.operationFailed', { error: err instanceof Error ? err.message : String(err) }));
+      throw err;
     }
   };
 
@@ -633,7 +629,7 @@ const ModelManager: React.FC = () => {
 
       <ModelForm
         visible={modalVisible}
-        onClose={() => setModalVisible(false)}
+        onClose={() => { formSession.current += 1; setModalVisible(false); }}
         onSubmit={handleFormSubmit}
         initialValues={currentModel}
         title={modalTitle}

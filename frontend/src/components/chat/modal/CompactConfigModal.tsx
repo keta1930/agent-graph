@@ -112,7 +112,7 @@ const CompactConfigModal: React.FC<CompactConfigModalProps> = ({
             >
               {availableModels.map(model => (
                 <Option key={model.name} value={model.name}>
-                  {model.alias || model.name}
+                  {model.name}
                 </Option>
               ))}
             </Select>

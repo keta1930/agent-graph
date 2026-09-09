@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { getErrorMessage } from '../utils/errors';
+import { getSessionGeneration, isCurrentSession } from '../utils/authSession';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Input, Card, Row, Col, Space, Typography, Spin, Empty, Tag, Collapse, App } from 'antd';
 import {
   Search as SearchIcon,
@@ -13,7 +15,6 @@ const { Panel } = Collapse;
 import conversationFileService from '../services/conversationFileService';
 import { ConversationService } from '../services/conversationService';
 import FileViewModal from '../components/conversation-file/FileViewModal';
-import { ConversationSummary } from '../types/conversation';
 import { downloadBlob } from '../utils/fileUtils';
 import FileIcon from '../components/conversation-file/FileIcon';
 import { useT } from '../i18n/hooks';
@@ -37,42 +38,12 @@ const FileManager: React.FC = () => {
   const t = useT();
   const { message } = App.useApp();
   const [allFiles, setAllFiles] = useState<FileItem[]>([]);
-  const [groupedConversations, setGroupedConversations] = useState<ConversationGroup[]>([]);
-  const [filteredGroups, setFilteredGroups] = useState<ConversationGroup[]>([]);
+  const request = useRef(0);
+  const listController = useRef<AbortController | null>(null);
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [selectedFile, setSelectedFile] = useState<{ filename: string; conversationId: string } | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-
-  useEffect(() => {
-    loadAllFiles();
-  }, []);
-
-  useEffect(() => {
-    // 分组文件
-    const grouped = groupFilesByConversation(allFiles);
-    setGroupedConversations(grouped);
-    setFilteredGroups(grouped);
-  }, [allFiles]);
-
-  useEffect(() => {
-    // 搜索过滤
-    if (!searchText.trim()) {
-      setFilteredGroups(groupedConversations);
-    } else {
-      const keyword = searchText.toLowerCase();
-      const filtered = groupedConversations
-        .map(group => ({
-          ...group,
-          files: group.files.filter(file =>
-            file.filename.toLowerCase().includes(keyword) ||
-            file.conversationTitle.toLowerCase().includes(keyword)
-          )
-        }))
-        .filter(group => group.files.length > 0);
-      setFilteredGroups(filtered);
-    }
-  }, [searchText, groupedConversations]);
 
   const groupFilesByConversation = (files: FileItem[]): ConversationGroup[] => {
     const groupMap = new Map<string, ConversationGroup>();
@@ -91,38 +62,63 @@ const FileManager: React.FC = () => {
     return Array.from(groupMap.values());
   };
 
-  const loadAllFiles = async () => {
+  const loadAllFiles = useCallback(async () => {
+    const owner = ++request.current;
+    listController.current?.abort();
+    const controller = new AbortController();
+    listController.current = controller;
+    const session = getSessionGeneration();
+    const isCurrent = () => owner === request.current && isCurrentSession(session);
+    const assertCurrent = () => {
+      if (!isCurrent() || controller.signal.aborted) throw new DOMException('List request was cancelled', 'AbortError');
+    };
     setLoading(true);
     try {
       // 1. 获取所有对话
-      const conversationsResponse = await ConversationService.getConversations();
+      const conversationsResponse = await ConversationService.getConversations({ signal: controller.signal });
+      assertCurrent();
       const conversations = conversationsResponse.conversations;
 
-      // 2. 为每个对话获取文件列表
-      const filePromises = conversations.map(async (conv: ConversationSummary) => {
-        try {
-          const filesResponse = await conversationFileService.listFiles(conv.conversation_id);
-          return filesResponse.files.map((filename) => ({
+      // 2. 固定 worker 数量，保留会话顺序并避免取齐后同时请求所有文件列表。
+      const filesArrays: FileItem[][] = new Array(conversations.length);
+      let nextIndex = 0;
+      const loadWorker = async () => {
+        while (nextIndex < conversations.length) {
+          assertCurrent();
+          const index = nextIndex++;
+          const conv = conversations[index];
+          const filesResponse = await conversationFileService.listFiles(conv.conversation_id, { signal: controller.signal });
+          assertCurrent();
+          filesArrays[index] = filesResponse.files.map(filename => ({
             filename,
             conversationId: conv.conversation_id,
             conversationTitle: conv.title,
           }));
-        } catch (error) {
-          console.error(`获取对话 ${conv.conversation_id} 的文件失败:`, error);
-          return [];
         }
-      });
-
-      const filesArrays = await Promise.all(filePromises);
+      };
+      await Promise.all(Array.from({ length: Math.min(4, conversations.length) }, loadWorker));
       const allFilesFlat = filesArrays.flat();
 
+      if (!isCurrent()) return;
       setAllFiles(allFilesFlat);
-    } catch (error: any) {
-      message.error(t('pages.fileManager.loadFailed', { error: error.message }));
+    } catch (error) {
+      if (!isCurrent()) return;
+      controller.abort();
+      message.error(t('pages.fileManager.loadFailed', { error: getErrorMessage(error) }));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  };
+  }, [message, t]);
+
+  useEffect(() => { void loadAllFiles(); return () => { request.current += 1; listController.current?.abort(); }; }, [loadAllFiles]);
+  const groupedConversations = useMemo(() => groupFilesByConversation(allFiles), [allFiles]);
+  const filteredGroups = useMemo(() => {
+    const keyword = searchText.trim().toLowerCase();
+    return groupedConversations.map(group => ({
+      ...group,
+      files: group.files.filter(file => file.filename.toLowerCase().includes(keyword) || file.conversationTitle.toLowerCase().includes(keyword)),
+    })).filter(group => group.files.length > 0);
+  }, [groupedConversations, searchText]);
 
   const handleSearch = (value: string) => {
     setSearchText(value);
@@ -142,8 +138,8 @@ const FileManager: React.FC = () => {
       const filename = file.filename.split('/').pop() || file.filename;
       downloadBlob(blob, filename);
       message.success(t('pages.fileManager.downloadSuccess'));
-    } catch (error: any) {
-      message.error(t('pages.fileManager.downloadFailed', { error: error.message }));
+    } catch (error) {
+      message.error(t('pages.fileManager.downloadFailed', { error: getErrorMessage(error) }));
     }
   };
 
@@ -152,8 +148,8 @@ const FileManager: React.FC = () => {
       const blob = await conversationFileService.downloadAllFiles(conversationId);
       downloadBlob(blob, `conversation_${conversationId}_files.zip`);
       message.success(t('pages.fileManager.downloadAllSuccess'));
-    } catch (error: any) {
-      message.error(t('pages.fileManager.downloadAllFailed', { error: error.message }));
+    } catch (error) {
+      message.error(t('pages.fileManager.downloadAllFailed', { error: getErrorMessage(error) }));
     }
   };
 

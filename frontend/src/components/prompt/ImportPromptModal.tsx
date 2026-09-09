@@ -1,13 +1,15 @@
 import React from 'react';
-import { Modal, Form, Input, Button, Upload, Space } from 'antd';
+import { Modal, Form, Input, Button, Upload, Space, type UploadFile } from 'antd';
 import { Upload as UploadIcon } from 'lucide-react';
 import { useT } from '../../i18n/hooks';
 import { BUTTON_STYLES } from '../../constants/promptManagerStyles';
 
+export interface PromptImportValues { file?: UploadFile[]; name: string; category?: string; }
+
 interface ImportPromptModalProps {
   open: boolean;
   loading: boolean;
-  onSubmit: (values: any) => void;
+  onSubmit: (values: PromptImportValues) => void;
   onCancel: () => void;
 }
 
@@ -30,7 +32,7 @@ const ImportPromptModal: React.FC<ImportPromptModalProps> = ({
     }
   };
 
-  const handleSubmit = (values: any) => {
+  const handleSubmit = (values: PromptImportValues) => {
     onSubmit(values);
   };
 

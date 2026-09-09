@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Card,
   Button,
@@ -67,22 +67,15 @@ const TaskList: React.FC<TaskListProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 12;
 
-  const {
-    tasks,
-    loading: storeLoading,
-    loadTasks,
-    updateTaskStatus,
-    deleteTask,
-    getTaskNextRunTime,
-    loadScheduledJobs
-  } = useTaskStore();
+  const loadTasks = useTaskStore(state => state.loadTasks);
+  const loadScheduledJobs = useTaskStore(state => state.loadScheduledJobs);
+  const tasks = useTaskStore(state => state.tasks);
+  const storeLoading = useTaskStore(state => state.loading);
+  const updateTaskStatus = useTaskStore(state => state.updateTaskStatus);
+  const deleteTask = useTaskStore(state => state.deleteTask);
+  const getTaskNextRunTime = useTaskStore(state => state.getTaskNextRunTime);
 
   const loading = storeLoading || externalLoading;
-
-  useEffect(() => {
-    loadTasks();
-    loadScheduledJobs();
-  }, [loadTasks, loadScheduledJobs]);
 
   const filteredTasks = React.useMemo(() => {
     let filtered = tasks;
@@ -124,14 +117,14 @@ const TaskList: React.FC<TaskListProps> = ({
   const handleStatusToggle = async (task: TaskSummary, e: React.MouseEvent) => {
     e.stopPropagation();
     const newStatus = task.status === TaskStatus.ACTIVE ? TaskStatus.PAUSED : TaskStatus.ACTIVE;
-    await updateTaskStatus(task.id, newStatus);
+    try { await updateTaskStatus(task.id, newStatus); } catch { /* store.error 由父页面展示。 */ }
   };
 
   const handleDelete = async (task: TaskSummary, e: React.MouseEvent) => {
     e.stopPropagation();
     const confirmed = window.confirm(t('pages.taskManager.deleteConfirm', { name: task.task_name }));
     if (confirmed) {
-      await deleteTask(task.id);
+      try { await deleteTask(task.id); } catch { /* store.error 由父页面展示。 */ }
     }
   };
 

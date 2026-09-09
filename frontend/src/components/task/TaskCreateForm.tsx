@@ -1,3 +1,4 @@
+import { getErrorMessage } from '../../utils/errors';
 import React, { useState, useEffect } from 'react';
 import {
   Drawer,
@@ -45,7 +46,7 @@ const TaskCreateForm: React.FC<TaskCreateFormProps> = ({
   const [cronExpression, setCronExpression] = useState('0 9 * * *');
   const [executeAt, setExecuteAt] = useState<Dayjs | null>(null);
 
-  const { createTask } = useTaskStore();
+  const createTask = useTaskStore(state => state.createTask);
   const t = useT();
 
   // 加载图列表
@@ -110,7 +111,7 @@ const TaskCreateForm: React.FC<TaskCreateFormProps> = ({
         message.error(result.message || t('pages.taskManager.taskCreateForm.createFailed'));
       }
     } catch (error) {
-      console.error('Form validation failed:', error);
+      if (!(error && typeof error === 'object' && 'errorFields' in error)) message.error(getErrorMessage(error, t('pages.taskManager.taskCreateForm.createFailed')));
     } finally {
       setLoading(false);
     }

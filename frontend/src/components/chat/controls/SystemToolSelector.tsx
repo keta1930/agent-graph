@@ -42,12 +42,15 @@ const SystemToolSelector: React.FC<SystemToolSelectorProps> = ({
   const [categories, setCategories] = useState<ToolCategory[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // 加载系统工具列表
   useEffect(() => {
-    if (showPanel && categories.length === 0) {
-      loadSystemTools();
-    }
-  }, [showPanel]);
+    if (!showPanel || categories.length) return;
+    let current = true;
+    setLoading(true);
+    void listSystemTools().then(response => { if (current) setCategories(response.categories); })
+      .catch(() => { if (current) message.error(t('components.systemToolSelector.loadFailed')); })
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [showPanel, categories.length, t]);
 
   // 点击外部关闭面板
   useEffect(() => {
@@ -62,19 +65,6 @@ const SystemToolSelector: React.FC<SystemToolSelectorProps> = ({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showPanel]);
-
-  const loadSystemTools = async () => {
-    setLoading(true);
-    try {
-      const response = await listSystemTools();
-      setCategories(response.categories || []);
-    } catch (error) {
-      console.error(t('components.systemToolSelector.loadFailed'), error);
-      message.error(t('components.systemToolSelector.loadFailed'));
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // 处理工具选择变更
   const handleToolToggle = (toolName: string, checked: boolean) => {

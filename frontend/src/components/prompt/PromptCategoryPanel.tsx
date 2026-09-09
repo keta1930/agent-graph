@@ -1,3 +1,4 @@
+import { useT } from '../../i18n/hooks';
 import React from 'react';
 import { Collapse, Row, Col, Tag, Typography } from 'antd';
 import { ChevronDown, BookOpen } from 'lucide-react';
@@ -24,6 +25,7 @@ interface PromptCategoryPanelProps {
  * 展示按分类分组的 Prompt 列表
  */
 const PromptCategoryPanel: React.FC<PromptCategoryPanelProps> = ({ groups, onEdit, onDelete }) => {
+  const t = useT();
   return (
     <Collapse
       defaultActiveKey={[]}
@@ -51,7 +53,7 @@ const PromptCategoryPanel: React.FC<PromptCategoryPanelProps> = ({ groups, onEdi
             <div style={COLLAPSE_STYLES.header}>
               <BookOpen size={18} color="#b85845" strokeWidth={1.5} />
               <Text strong style={COLLAPSE_STYLES.headerText}>
-                {group.category}
+                {group.category || t('pages.promptManager.uncategorized')}
               </Text>
               <Tag style={{ ...TAG_STYLES.secondary, margin: 0 }}>
                 {group.prompts.length}

@@ -23,34 +23,34 @@ export const projectService = {
   },
 
   async updateProject(projectId: string, payload: UpdateProjectRequest): Promise<ProjectOperationResponse> {
-    const response = await api.put(`${PROJECT_API_BASE}/${projectId}`, payload);
+    const response = await api.put(`${PROJECT_API_BASE}/${encodeURIComponent(projectId)}`, payload);
     return response.data;
   },
 
   async deleteProject(projectId: string): Promise<ProjectOperationResponse> {
-    const response = await api.delete(`${PROJECT_API_BASE}/${projectId}`);
+    const response = await api.delete(`${PROJECT_API_BASE}/${encodeURIComponent(projectId)}`);
     return response.data;
   },
 
-  async getProjectDetail(projectId: string, includeConversations = true): Promise<ProjectDetail> {
-    const response = await api.get(`${PROJECT_API_BASE}/${projectId}`, {
-      params: { include_conversations: includeConversations },
+  async getProjectDetail(projectId: string, includeConversations = true, options: { signal?: AbortSignal } = {}): Promise<ProjectDetail> {
+    const response = await api.get(`${PROJECT_API_BASE}/${encodeURIComponent(projectId)}`, {
+      params: { include_conversations: includeConversations }, ...options,
     });
     return response.data;
   },
 
-  async getProjectConversations(projectId: string): Promise<{
+  async getProjectConversations(projectId: string, options: { signal?: AbortSignal } = {}): Promise<{
     success: boolean;
     project_id: string;
     conversations: ProjectDetail['conversations'];
     total_count: number;
   }> {
-    const response = await api.get(`${PROJECT_API_BASE}/${projectId}/conversations`);
+    const response = await api.get(`${PROJECT_API_BASE}/${encodeURIComponent(projectId)}/conversations`, options);
     return response.data;
   },
 
   async moveConversationToProject(conversationId: string, projectId?: string | null): Promise<ProjectOperationResponse> {
-    const response = await api.put(`/conversations/${conversationId}/project`, {
+    const response = await api.put(`/conversations/${encodeURIComponent(conversationId)}/project`, {
       project_id: projectId ?? null,
     });
     return response.data;

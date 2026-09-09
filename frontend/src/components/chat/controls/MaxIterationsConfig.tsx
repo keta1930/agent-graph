@@ -66,7 +66,7 @@ const MaxIterationsConfig: React.FC<MaxIterationsConfigProps> = ({
   };
 
   return (
-    <div style={{ position: 'relative' }} ref={dropdownRef}>
+    <div className={className} style={{ position: 'relative' }} ref={dropdownRef}>
       <Tooltip title={value ? t('components.maxIterationsConfig.currentValue', { value }) : t('components.maxIterationsConfig.configure')}>
         <Button
           type="text"

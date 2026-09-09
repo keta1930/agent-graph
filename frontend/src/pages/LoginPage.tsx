@@ -4,7 +4,7 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Input, Button, Alert, Typography, Space } from 'antd';
 import { User, Lock, LogIn } from 'lucide-react';
 import { login } from '../services/authService';
-import { setToken, setRefreshToken, setUserInfo } from '../utils/auth';
+import { getErrorMessage } from '../utils/errors';
 import LanguageSwitcher from '../components/common/LanguageSwitcher';
 import { useT } from '../i18n/hooks';
 
@@ -20,7 +20,7 @@ const LoginPage: React.FC = () => {
   const t = useT();
 
   // 获取注册成功后的提示消息
-  const successMessage = (location.state as any)?.message;
+  const successMessage = typeof location.state?.message === 'string' ? location.state.message : undefined;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,20 +28,13 @@ const LoginPage: React.FC = () => {
     setLoading(true);
 
     try {
-      const response = await login(userId, password);
-
-      // 保存Token和用户信息
-      setToken(response.access_token);
-      setRefreshToken(response.refresh_token);
-      setUserInfo({
-        user_id: response.user_id,
-        role: response.role as 'super_admin' | 'admin' | 'user'
-      });
+      await login(userId, password);
 
       // 跳转到主页
       navigate('/');
-    } catch (err: any) {
-      setError(err.response?.data?.detail || t('pages.login.loginFailedDefault'));
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      setError(getErrorMessage(err, t('pages.login.loginFailedDefault')));
     } finally {
       setLoading(false);
     }

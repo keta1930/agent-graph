@@ -1,41 +1,31 @@
-// src/store/conversationStore.ts
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import {
-  ConversationSummary,
-  ConversationDetail,
-  ConversationMode,
-  SSEMessage
-} from '../types/conversation';
-import { ConversationService, ConversationStorage } from '../services/conversationService';
 import { message } from 'antd';
+import type { ConversationSummary, ConversationDetail, ConversationMode, SSEMessage } from '../types/conversation';
+import { ConversationService, ConversationStorage } from '../services/conversationService';
+import { assertSession, captureSession } from '../services/authSessionService';
+import { createRequestScope } from '../services/requestLifecycle';
+import { registerSessionReset, isCurrentSession } from '../utils/authSession';
+import { getErrorMessage } from '../utils/errors';
 
+export interface BatchMutationResult {
+  succeededIds: string[];
+  failed: { id: string; message: string }[];
+}
 interface ConversationState {
-  // 对话列表
   conversations: ConversationSummary[];
   totalCount: number;
   loading: boolean;
-  
-  // 当前对话
+  error: string | null;
   currentConversation: ConversationDetail | null;
   currentConversationLoading: boolean;
-  
-  // 对话模式
   currentMode: ConversationMode;
-  
-  // 搜索和筛选
   searchQuery: string;
   statusFilter: 'active' | 'favorite' | 'deleted';
   typeFilter: 'agent' | 'graph';
-  
-  // SSE连接
   currentSSE: EventSource | null;
   isStreaming: boolean;
-  
-  // UI状态
   sidebarCollapsed: boolean;
-  
-  // 操作
   loadConversations: (forceRefresh?: boolean) => Promise<void>;
   silentUpdateConversations: () => Promise<void>;
   loadConversationDetail: (conversationId: string) => Promise<void>;
@@ -43,367 +33,174 @@ interface ConversationState {
   updateConversationTitle: (conversationId: string, title: string) => Promise<void>;
   updateConversationTags: (conversationId: string, tags: string[]) => Promise<void>;
   deleteConversationPermanent: (conversationId: string) => Promise<void>;
-  batchDeleteConversations: (conversationIds: string[], isPermanent: boolean) => Promise<{ success: number; failed: number }>;
-  
-  // 对话操作
+  batchDeleteConversations: (conversationIds: string[], isPermanent: boolean, options?: { refresh?: boolean }) => Promise<BatchMutationResult>;
   setCurrentMode: (mode: ConversationMode) => void;
   clearCurrentConversation: () => void;
   updateCurrentConversationTemporarily: (conversation: ConversationDetail) => void;
-  
-  // SSE操作
+  patchCurrentConversation: (conversationId: string, patch: Partial<ConversationDetail>) => void;
   startSSEConnection: (sse: EventSource) => void;
   stopSSEConnection: () => void;
   handleSSEMessage: (message: SSEMessage) => void;
-  
-  // 搜索和筛选
   setSearchQuery: (query: string) => void;
   setStatusFilter: (filter: 'active' | 'favorite' | 'deleted') => void;
   setTypeFilter: (filter: 'agent' | 'graph') => void;
-  
-  // UI操作
   toggleSidebar: () => void;
-  
-  // 通知
   showNotification: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
+const listRequest = createRequestScope();
+const detailRequest = createRequestScope();
+let cacheUser: string | null = captureSession().userId;
+function sidebarCollapsed(): boolean {
+  try { return localStorage.getItem('sidebar_collapsed') === 'true'; } catch { return false; }
+}
+const initialState = () => ({
+  conversations: [] as ConversationSummary[], totalCount: 0, loading: false, error: null,
+  currentConversation: null, currentConversationLoading: false, currentMode: 'agent' as const,
+  searchQuery: '', statusFilter: 'active' as const, typeFilter: 'agent' as const,
+  currentSSE: null, isStreaming: false, sidebarCollapsed: sidebarCollapsed(),
+});
 
-export const useConversationStore = create<ConversationState>()(
-  subscribeWithSelector((set, get) => ({
-    // 初始状态
-    conversations: [],
-    totalCount: 0,
-    loading: false,
-    currentConversation: null,
-    currentConversationLoading: false,
-    currentMode: 'agent',
-    searchQuery: '',
-    statusFilter: 'active',
-    typeFilter: 'agent',
-    currentSSE: null,
-    isStreaming: false,
-    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true',
-
-    // 加载对话列表
-    loadConversations: async (forceRefresh = false) => {
-      if (!forceRefresh) {
-        const cached = ConversationStorage.getCachedConversationList();
-        if (cached) {
-          set({ conversations: cached.conversations, totalCount: cached.total_count });
-          return;
-        }
+export const useConversationStore = create<ConversationState>()(subscribeWithSelector((set, get) => {
+  const loadList = (force: boolean, silent: boolean) => listRequest.run('all', async context => {
+    cacheUser = context.userId;
+    if (!force) {
+      const cached = ConversationStorage.getCachedConversationList(context.userId);
+      if (cached) { set({ conversations: cached.conversations, totalCount: cached.total_count }); return; }
+    }
+    if (!silent) set({ loading: true, error: null });
+    try {
+      const result = await ConversationService.getConversations({ signal: context.signal });
+      if (!context.isCurrent()) return;
+      let conversations = result.conversations;
+      if (silent) {
+        const byId = new Map(conversations.map(item => [item.conversation_id, item]));
+        const oldIds = new Set(get().conversations.map(item => item.conversation_id));
+        conversations = [
+          ...conversations.filter(item => !oldIds.has(item.conversation_id)),
+          ...get().conversations.flatMap(item => { const current = byId.get(item.conversation_id); return current ? [current] : []; }),
+        ];
       }
-
-      set({ loading: true });
+      ConversationStorage.cacheConversationList(result, context.userId);
+      set({ conversations, totalCount: result.total_count });
+    } catch (error) {
+      if (!context.isCurrent()) return;
+      set({ error: getErrorMessage(error, '加载对话列表失败') });
+      if (!silent) get().showNotification('加载对话列表失败', 'error');
+    } finally { if (context.isCurrent()) set({ loading: false }); }
+  });
+  const mutate = async (operation: () => Promise<void>, apply: () => void) => {
+    const session = captureSession();
+    try {
+      await operation();
+      assertSession(session.generation);
+      listRequest.invalidate();
+      apply();
+      ConversationStorage.clearConversationListCache(session.userId);
+      await loadList(true, true);
+    } catch (error) {
+      if (isCurrentSession(session.generation)) set({ error: getErrorMessage(error) });
+      throw error;
+    }
+  };
+  return {
+    ...initialState(),
+    loadConversations: (forceRefresh = false) => loadList(forceRefresh, false),
+    silentUpdateConversations: () => loadList(true, true),
+    loadConversationDetail: conversationId => detailRequest.run(conversationId, async context => {
+      cacheUser = context.userId;
+      set({ currentConversationLoading: true, error: null });
       try {
-        const result = await ConversationService.getConversations();
-        ConversationStorage.cacheConversationList(result);
-        set({ 
-          conversations: result.conversations, 
-          totalCount: result.total_count,
-          loading: false 
-        });
+        const detail = await ConversationService.getConversationDetail(conversationId, { signal: context.signal });
+        if (!context.isCurrent()) return;
+        ConversationStorage.setCurrentConversation(detail, context.userId);
+        set({ currentConversation: detail, currentMode: detail.type });
       } catch (error) {
-        console.error('Failed to load conversations:', error);
-        set({ loading: false });
-        get().showNotification('加载对话列表失败', 'error');
-      }
-    },
-
-    // 静默更新对话列表（不显示loading状态）
-    silentUpdateConversations: async () => {
-      try {
-        const result = await ConversationService.getConversations();
-        ConversationStorage.cacheConversationList(result);
-        
-        // 平滑更新：保持现有对话的顺序，只更新数据
-        const currentConversations = get().conversations;
-        const newConversations = result.conversations;
-        
-        // 创建一个映射来快速查找新对话数据
-        const newConversationsMap = new Map(
-          newConversations.map(conv => [conv.conversation_id, conv])
-        );
-
-        // 更新现有对话的数据，保持顺序
-        const updatedConversations = currentConversations.map(conv => {
-          const newConv = newConversationsMap.get(conv.conversation_id);
-          return newConv || conv; // 如果找到新数据则使用，否则保持原有数据
-        });
-
-        // 添加新的对话到列表开头（如果有的话）
-        const existingIds = new Set(currentConversations.map(conv => conv.conversation_id));
-        const newlyAddedConversations = newConversations.filter(
-          conv => !existingIds.has(conv.conversation_id)
-        );
-        
-        const finalConversations = [...newlyAddedConversations, ...updatedConversations];
-        
-        set({ 
-          conversations: finalConversations, 
-          totalCount: result.total_count 
-        });
-      } catch (error) {
-        console.error('Failed to silently update conversations:', error);
-        // 静默更新失败时不显示错误通知，避免打扰用户
-      }
-    },
-
-    // 加载对话详情
-    loadConversationDetail: async (conversationId: string) => {
-      set({ currentConversationLoading: true });
-      try {
-        const detail = await ConversationService.getConversationDetail(conversationId);
-        ConversationStorage.setCurrentConversation(detail);
-        
-        // 根据 type 设置正确的 currentMode
-        let mode: ConversationMode = 'agent'; // 默认为 agent
-        if (detail.type === 'graph') {
-          mode = 'graph';
-        } else if (detail.type === 'agent') {
-          mode = 'agent';
-        }
-        
-        set({ 
-          currentConversation: detail,
-          currentMode: mode,
-          currentConversationLoading: false 
-        });
-      } catch (error) {
-        console.error('Failed to load conversation detail:', error);
-        set({ currentConversationLoading: false });
+        if (!context.isCurrent()) return;
+        set({ error: getErrorMessage(error, '加载对话详情失败') });
         get().showNotification('加载对话详情失败', 'error');
-      }
-    },
-
-    // 更新对话状态
-    updateConversationStatus: async (conversationId: string, status: 'active' | 'deleted' | 'favorite') => {
-      try {
-        await ConversationService.updateConversationStatus(conversationId, status);
-        
-        // 更新本地状态
-        set(state => ({
-          conversations: state.conversations.map(conv =>
-            conv.conversation_id === conversationId ? { ...conv, status } : conv
-          )
-        }));
-        
-        // 清除缓存并静默刷新最新数据
-        ConversationStorage.clearConversationListCache();
-        get().silentUpdateConversations();
-        get().showNotification('状态更新成功', 'success');
-      } catch (error) {
-        console.error('Failed to update conversation status:', error);
-        get().showNotification('状态更新失败', 'error');
-      }
-    },
-
-    // 更新对话标题
-    updateConversationTitle: async (conversationId: string, title: string) => {
-      try {
-        await ConversationService.updateConversationTitle(conversationId, title);
-        
-        // 更新本地状态
-        set(state => ({
-          conversations: state.conversations.map(conv =>
-            conv.conversation_id === conversationId ? { ...conv, title } : conv
-          )
-        }));
-        
-        // 更新当前对话标题
-        ConversationStorage.updateCurrentConversationTitle(title);
-        if (get().currentConversation?.conversation_id === conversationId) {
-          set(state => ({
-            currentConversation: state.currentConversation ? 
-              { ...state.currentConversation, title } : null
-          }));
-        }
-        
-        // 清除缓存并静默刷新最新数据
-        ConversationStorage.clearConversationListCache();
-        get().silentUpdateConversations();
-        get().showNotification('标题更新成功', 'success');
-      } catch (error) {
-        console.error('Failed to update conversation title:', error);
-        get().showNotification('标题更新失败', 'error');
-      }
-    },
-
-    // 更新对话标签
-    updateConversationTags: async (conversationId: string, tags: string[]) => {
-      try {
-        await ConversationService.updateConversationTags(conversationId, tags);
-        
-        // 更新本地状态
-        set(state => ({
-          conversations: state.conversations.map(conv =>
-            conv.conversation_id === conversationId ? { ...conv, tags } : conv
-          )
-        }));
-        
-        // 清除缓存并静默刷新最新数据
-        ConversationStorage.clearConversationListCache();
-        get().silentUpdateConversations();
-        get().showNotification('标签更新成功', 'success');
-      } catch (error) {
-        console.error('Failed to update conversation tags:', error);
-        get().showNotification('标签更新失败', 'error');
-      }
-    },
-
-    // 永久删除对话
-    deleteConversationPermanent: async (conversationId: string) => {
-      try {
-        await ConversationService.deleteConversationPermanent(conversationId);
-        
-        // 从本地状态移除
-        set(state => ({
-          conversations: state.conversations.filter(conv => conv.conversation_id !== conversationId),
-          totalCount: state.totalCount - 1
-        }));
-        
-        // 如果是当前对话，清除
-        if (get().currentConversation?.conversation_id === conversationId) {
-          get().clearCurrentConversation();
-        }
-        
-        // 清除缓存并静默刷新最新数据
-        ConversationStorage.clearConversationListCache();
-        get().silentUpdateConversations();
-        get().showNotification('对话已永久删除', 'success');
-      } catch (error) {
-        console.error('Failed to delete conversation:', error);
-        get().showNotification('删除对话失败', 'error');
-      }
-    },
-
-    // 批量删除对话
-    batchDeleteConversations: async (conversationIds: string[], isPermanent: boolean) => {
-      let successCount = 0;
-      let failCount = 0;
-      
-      for (const conversationId of conversationIds) {
+      } finally { if (context.isCurrent()) set({ currentConversationLoading: false }); }
+    }),
+    updateConversationStatus: (id, status) => mutate(() => ConversationService.updateConversationStatus(id, status), () => {
+      set(state => ({ conversations: state.conversations.map(item => item.conversation_id === id ? { ...item, status } : item) }));
+    }),
+    updateConversationTitle: (id, title) => mutate(() => ConversationService.updateConversationTitle(id, title), () => {
+      set(state => ({ conversations: state.conversations.map(item => item.conversation_id === id ? { ...item, title } : item) }));
+      get().patchCurrentConversation(id, { title });
+    }),
+    updateConversationTags: (id, tags) => mutate(() => ConversationService.updateConversationTags(id, tags), () => {
+      set(state => ({ conversations: state.conversations.map(item => item.conversation_id === id ? { ...item, tags } : item) }));
+    }),
+    deleteConversationPermanent: id => mutate(() => ConversationService.deleteConversationPermanent(id), () => {
+      set(state => ({ conversations: state.conversations.filter(item => item.conversation_id !== id), totalCount: Math.max(0, state.totalCount - 1) }));
+      if (get().currentConversation?.conversation_id === id) get().clearCurrentConversation();
+    }),
+    batchDeleteConversations: async (ids, permanent, options) => {
+      const session = captureSession();
+      const result: BatchMutationResult = { succeededIds: [], failed: [] };
+      for (const id of new Set(ids)) {
+        assertSession(session.generation);
         try {
-          if (isPermanent) {
-            await ConversationService.deleteConversationPermanent(conversationId);
-          } else {
-            await ConversationService.updateConversationStatus(conversationId, 'deleted');
-          }
-          successCount++;
+          if (permanent) await ConversationService.deleteConversationPermanent(id);
+          else await ConversationService.updateConversationStatus(id, 'deleted');
+          assertSession(session.generation);
+          result.succeededIds.push(id);
         } catch (error) {
-          console.error(`Failed to delete conversation ${conversationId}:`, error);
-          failCount++;
+          assertSession(session.generation);
+          result.failed.push({ id, message: getErrorMessage(error) });
         }
       }
-      
-      // 批量更新本地状态
-      if (isPermanent) {
-        // 永久删除：从列表中移除
+      assertSession(session.generation);
+      if (result.succeededIds.length) {
+        listRequest.invalidate();
+        const removed = new Set(result.succeededIds);
         set(state => ({
-          conversations: state.conversations.filter(conv => !conversationIds.includes(conv.conversation_id)),
-          totalCount: state.totalCount - successCount
+          conversations: permanent ? state.conversations.filter(item => !removed.has(item.conversation_id)) : state.conversations.map(item => removed.has(item.conversation_id) ? { ...item, status: 'deleted' } : item),
+          totalCount: permanent ? Math.max(0, state.totalCount - removed.size) : state.totalCount,
         }));
-      } else {
-        // 软删除：更新状态
-        set(state => ({
-          conversations: state.conversations.map(conv =>
-            conversationIds.includes(conv.conversation_id) ? { ...conv, status: 'deleted' as const } : conv
-          )
-        }));
+        const current = get().currentConversation;
+        if (current && removed.has(current.conversation_id)) get().clearCurrentConversation();
+        ConversationStorage.clearConversationListCache(session.userId);
+        if (options?.refresh !== false) await loadList(true, true);
       }
-      
-      // 清除缓存并刷新
-      ConversationStorage.clearConversationListCache();
-      get().silentUpdateConversations();
-      
-      return { success: successCount, failed: failCount };
+      return result;
     },
-
-    // 设置当前模式
-    setCurrentMode: (mode: ConversationMode) => {
-      set({ currentMode: mode });
-    },
-
-    // 清除当前对话
+    setCurrentMode: currentMode => set({ currentMode }),
     clearCurrentConversation: () => {
+      detailRequest.invalidate();
       get().stopSSEConnection();
-      ConversationStorage.clearCurrentConversation();
-      set({ currentConversation: null });
+      ConversationStorage.clearCurrentConversation(captureSession().userId);
+      set({ currentConversation: null, currentConversationLoading: false });
     },
-
-    // 临时更新当前对话（用于立即显示用户消息）
-    updateCurrentConversationTemporarily: (conversation: ConversationDetail) => {
-      set({ currentConversation: conversation });
-      ConversationStorage.setCurrentConversation(conversation);
+    updateCurrentConversationTemporarily: currentConversation => {
+      detailRequest.invalidate();
+      set({ currentConversation, currentConversationLoading: false });
+      ConversationStorage.setCurrentConversation(currentConversation, captureSession().userId);
     },
-
-    // 开始SSE连接
-    startSSEConnection: (sse: EventSource) => {
-      get().stopSSEConnection(); // 先停止之前的连接
-      set({ currentSSE: sse, isStreaming: true });
+    patchCurrentConversation: (id, patch) => {
+      const current = get().currentConversation;
+      if (current?.conversation_id === id) get().updateCurrentConversationTemporarily({ ...current, ...patch, conversation_id: id });
     },
-
-    // 停止SSE连接
-    stopSSEConnection: () => {
-      const { currentSSE } = get();
-      if (currentSSE) {
-        currentSSE.close();
-        set({ currentSSE: null, isStreaming: false });
-      }
+    startSSEConnection: currentSSE => { get().stopSSEConnection(); set({ currentSSE, isStreaming: true }); },
+    stopSSEConnection: () => { get().currentSSE?.close(); set({ currentSSE: null, isStreaming: false }); },
+    handleSSEMessage: event => {
+      if (event.error) { get().showNotification(event.error.message, 'error'); get().stopSSEConnection(); }
+      else if (event.completion) { get().showNotification(event.completion.message, 'success'); get().stopSSEConnection(); }
     },
-
-    // 处理SSE消息
-    handleSSEMessage: (message: SSEMessage) => {
-      // 这里可以根据消息类型进行不同的处理
-      console.log('SSE Message:', message);
-      
-      if (message.error) {
-        get().showNotification(message.error.message, 'error');
-        get().stopSSEConnection();
-      }
-      
-      if (message.completion) {
-        get().showNotification(message.completion.message, 'success');
-        get().stopSSEConnection();
-      }
-    },
-
-    // 设置搜索查询
-    setSearchQuery: (query: string) => {
-      set({ searchQuery: query });
-    },
-
-    // 设置状态筛选
-    setStatusFilter: (filter: 'active' | 'favorite' | 'deleted') => {
-      set({ statusFilter: filter });
-    },
-
-    // 设置类型筛选
-    setTypeFilter: (filter: 'agent' | 'graph') => {
-      set({ typeFilter: filter });
-    },
-
-    // 切换侧边栏
+    setSearchQuery: searchQuery => set({ searchQuery }),
+    setStatusFilter: statusFilter => set({ statusFilter }),
+    setTypeFilter: typeFilter => set({ typeFilter }),
     toggleSidebar: () => {
       const collapsed = !get().sidebarCollapsed;
-      localStorage.setItem('sidebar_collapsed', collapsed.toString());
+      try { localStorage.setItem('sidebar_collapsed', String(collapsed)); } catch { /* UI 偏好不依赖存储成功。 */ }
       set({ sidebarCollapsed: collapsed });
     },
-
-    // 显示通知
-    showNotification: (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
-      // 使用 antd 的 message 组件
-      switch (type) {
-        case 'success':
-          message.success(msg);
-          break;
-        case 'error':
-          message.error(msg);
-          break;
-        case 'info':
-        default:
-          message.info(msg);
-          break;
-      }
-    }
-  }))
-);
+    showNotification: (text, type = 'info') => { void message[type](text); },
+  };
+}));
+registerSessionReset(() => {
+  listRequest.invalidate(); detailRequest.invalidate();
+  useConversationStore.getState().currentSSE?.close();
+  ConversationStorage.clearConversationListCache(cacheUser);
+  ConversationStorage.clearCurrentConversation(cacheUser);
+  useConversationStore.setState(initialState());
+});

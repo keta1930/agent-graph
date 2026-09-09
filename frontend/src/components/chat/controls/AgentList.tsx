@@ -61,7 +61,8 @@ const AgentList: React.FC<AgentListProps> = ({
     setLoadingDetails(prev => ({ ...prev, [agentName]: true }));
     
     try {
-      const agent = await getAgent(agentName);
+      const response = await getAgent(agentName);
+      const agent = response.agent;
       setAgentDetails(prev => ({ ...prev, [agentName]: agent }));
     } catch (error) {
       console.error(t('components.agentList.loadDetailsFailed'), error);

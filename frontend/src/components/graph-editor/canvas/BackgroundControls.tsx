@@ -1,5 +1,5 @@
 import React from 'react';
-import { Background } from 'reactflow';
+import { Background, BackgroundVariant } from 'reactflow';
 import { Button, Tooltip } from 'antd';
 import {
   Palette, Square, Minus, EyeOff, Grid3x3
@@ -17,25 +17,25 @@ export type BackgroundType = 'none' | 'dots' | 'lines' | 'grid' | 'cross';
 const backgroundConfigs = {
   none: null,
   dots: {
-    variant: 'dots' as const,
+    variant: BackgroundVariant.Dots,
     gap: 20,
     size: 2,
     color: 'rgba(139, 115, 85, 0.35)', // 系统主题色的浅色点
   },
   lines: {
-    variant: 'lines' as const,
+    variant: BackgroundVariant.Lines,
     gap: 24,
     size: 1,
     color: 'rgba(139, 115, 85, 0.25)', // 系统主题色的浅色线条
   },
   grid: {
-    variant: 'lines' as const,
+    variant: BackgroundVariant.Lines,
     gap: 16,
     size: 1,
     color: 'rgba(139, 115, 85, 0.3)', // 系统主题色的浅色网格
   },
   cross: {
-    variant: 'cross' as const,
+    variant: BackgroundVariant.Cross,
     gap: 32,
     size: 2,
     color: 'rgba(139, 115, 85, 0.4)', // 系统主题色的稍深交叉
@@ -145,7 +145,7 @@ const BackgroundControls: React.FC<BackgroundControlsProps> = ({
  * @param backgroundType - 背景类型
  * @returns ReactFlow Background 组件或 null
  */
-export const renderBackground = (backgroundType: BackgroundType) => {
+export const CanvasBackground = ({ backgroundType }: { backgroundType: BackgroundType }) => {
   const config = backgroundConfigs[backgroundType];
   if (!config) return null;
 
@@ -154,7 +154,7 @@ export const renderBackground = (backgroundType: BackgroundType) => {
       gap={config.gap}
       size={config.size}
       color={config.color}
-      variant={config.variant as any}
+      variant={config.variant}
     />
   );
 };

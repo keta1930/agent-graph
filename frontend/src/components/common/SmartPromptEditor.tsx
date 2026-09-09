@@ -29,7 +29,7 @@ const SmartPromptEditor: React.FC<SmartPromptEditorProps> = ({
   const [autoCompleteOptions, setAutoCompleteOptions] = useState<{ value: string; type: 'node' | 'prompt'; isSpecial?: boolean }[]>([]);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [availablePrompts, setAvailablePrompts] = useState<string[]>([]);
-  const textAreaRef = useRef<any>(null);
+  const textAreaRef = useRef<React.ComponentRef<typeof TextArea>>(null);
 
   // 由于availableNodes已经包含所有节点，直接使用
   const allAvailableNodes = availableNodes;
@@ -40,7 +40,7 @@ const SmartPromptEditor: React.FC<SmartPromptEditorProps> = ({
       try {
         const prompts = await promptService.listPrompts();
         if (prompts.success && prompts.data && Array.isArray(prompts.data.prompts)) {
-          setAvailablePrompts(prompts.data.prompts.map((prompt: any) => prompt.name));
+          setAvailablePrompts(prompts.data.prompts.map((prompt) => prompt.name));
         }
       } catch (error) {
         console.error('获取提示词列表失败:', error);

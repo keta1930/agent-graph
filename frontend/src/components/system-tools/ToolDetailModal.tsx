@@ -1,3 +1,4 @@
+import type { JsonObject } from '../../types/json';
 // src/components/system-tools/ToolDetailModal.tsx
 import React from 'react';
 import { Modal, Descriptions, Tag, Typography } from 'antd';
@@ -24,8 +25,8 @@ const ToolDetailModal: React.FC<ToolDetailModalProps> = ({ visible, tool, onClos
   /**
    * 渲染参数信息
    */
-  const renderParameters = (parameters: any) => {
-    if (!parameters || !parameters.properties) {
+  const renderParameters = (parameters: JsonObject) => {
+    if (!parameters.properties || typeof parameters.properties !== 'object' || Array.isArray(parameters.properties)) {
       return (
         <Text style={{ color: COLORS.textLight, fontStyle: 'italic' }}>
           {t('pages.systemToolsManager.detailModal.noParameters')}
@@ -34,11 +35,13 @@ const ToolDetailModal: React.FC<ToolDetailModalProps> = ({ visible, tool, onClos
     }
 
     const props = parameters.properties;
-    const required = parameters.required || [];
+    const required = Array.isArray(parameters.required) ? parameters.required : [];
 
     return (
       <div>
-        {Object.entries(props).map(([key, value]: [string, any]) => (
+        {Object.entries(props).map(([key, value]) => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+          return (
           <div key={key} style={{
             marginBottom: '12px',
             paddingBottom: '12px',
@@ -62,7 +65,7 @@ const ToolDetailModal: React.FC<ToolDetailModalProps> = ({ visible, tool, onClos
                 </Tag>
               )}
               <Tag style={TAG_STYLES.tertiary}>
-                {value.type}
+                {typeof value.type === 'string' ? value.type : ''}
               </Tag>
             </div>
             <Text style={{
@@ -70,10 +73,10 @@ const ToolDetailModal: React.FC<ToolDetailModalProps> = ({ visible, tool, onClos
               color: COLORS.textSecondary,
               lineHeight: '1.6'
             }}>
-              {value.description || t('pages.systemToolsManager.detailModal.noDescription')}
+              {typeof value.description === 'string' ? value.description : t('pages.systemToolsManager.detailModal.noDescription')}
             </Text>
           </div>
-        ))}
+        ); })}
       </div>
     );
   };

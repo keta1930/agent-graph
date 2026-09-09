@@ -5,6 +5,7 @@ import ReasoningDisplay from './ReasoningDisplay';
 import SmartMarkdown from './SmartMarkdown';
 import ToolCallDisplay from './ToolCallDisplay';
 import NodeExecutionInfo from './NodeExecutionInfo';
+import { parseToolResults } from './messageUtils';
 
 interface StreamingBlockDisplayProps {
   block: StreamingBlock;
@@ -19,7 +20,6 @@ interface StreamingBlockDisplayProps {
  */
 const StreamingBlockDisplay: React.FC<StreamingBlockDisplayProps> = ({
   block,
-  renderingMode,
   toolResults = {},
   conversationId
 }) => {
@@ -48,23 +48,12 @@ const StreamingBlockDisplay: React.FC<StreamingBlockDisplayProps> = ({
         </div>
       );
 
-    case 'tool_calls':
-      // 从块内容中解析工具结果
-      let blockToolResults: Record<string, string> = {};
-      try {
-        if (block.content) {
-          blockToolResults = JSON.parse(block.content);
-        }
-      } catch {
-        // 解析失败时使用空对象
-      }
-
-      // 合并外部传入的工具结果和块内部的工具结果
-      const combinedToolResults = { ...toolResults, ...blockToolResults };
+    case 'tool_calls': {
+      const combinedToolResults = { ...toolResults, ...parseToolResults(block.content) };
 
       return (
         <div className="tool-calls-block">
-          {block.toolCalls?.map((toolCall: any, index: number) => (
+          {block.toolCalls?.map((toolCall, index) => (
             <ToolCallDisplay
               key={toolCall.id || index}
               toolCall={toolCall}
@@ -76,6 +65,7 @@ const StreamingBlockDisplay: React.FC<StreamingBlockDisplayProps> = ({
         </div>
       );
 
+    }
     case 'node_start':
       // 渲染节点信息
       if (block.nodeInfo) {
@@ -90,12 +80,9 @@ const StreamingBlockDisplay: React.FC<StreamingBlockDisplayProps> = ({
       return null;
 
     case 'task':
-      // Task blocks are handled separately in the main render logic
-      return null;
-
-    default:
+      // 任务容器由父级根据 taskId 分组展示。
       return null;
   }
 };
 
-export default StreamingBlockDisplay;
+export default React.memo(StreamingBlockDisplay);

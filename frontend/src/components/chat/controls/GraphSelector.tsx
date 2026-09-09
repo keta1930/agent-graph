@@ -55,9 +55,7 @@ const GraphSelector: React.FC<GraphSelectorProps> = ({
         placement="topRight"
         dropdownStyle={{ minWidth: '220px' }}
         filterOption={(input, option) =>
-          (option?.children as string)
-            ?.toLowerCase()
-            .indexOf(input.toLowerCase()) >= 0
+          String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
         }
       >
         {availableGraphs && availableGraphs.length > 0 && (

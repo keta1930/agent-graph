@@ -1,5 +1,8 @@
 // src/store/systemToolsStore.ts
 import { create } from 'zustand';
+import { createRequestScope } from '../services/requestLifecycle';
+import { registerSessionReset } from '../utils/authSession';
+import { getErrorMessage } from '../utils/errors';
 import * as systemToolsService from '../services/systemToolsService';
 
 interface SystemToolsState {
@@ -10,28 +13,21 @@ interface SystemToolsState {
   fetchSystemTools: () => Promise<void>;
 }
 
+const request = createRequestScope();
+
 export const useSystemToolsStore = create<SystemToolsState>((set) => ({
   systemTools: [],
   loading: false,
   error: undefined,
 
-  fetchSystemTools: async () => {
+  fetchSystemTools: () => request.run('all', async context => {
+    set({ loading: true, error: undefined });
     try {
-      set({ loading: true, error: undefined });
-      const response = await systemToolsService.listSystemTools();
-      // Extract tool names from all categories
-      const toolNames: string[] = [];
-      response.categories.forEach(category => {
-        category.tools.forEach(tool => {
-          toolNames.push(tool.name);
-        });
-      });
-      set({ systemTools: toolNames, loading: false });
+      const response = await systemToolsService.listSystemTools({ signal: context.signal });
+      if (context.isCurrent()) set({ systemTools: response.categories.flatMap(category => category.tools.map(tool => tool.name)) });
     } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch system tools'
-      });
-    }
-  },
+      if (context.isCurrent()) set({ error: getErrorMessage(error) });
+    } finally { if (context.isCurrent()) set({ loading: false }); }
+  }),
 }));
+registerSessionReset(() => { request.invalidate(); useSystemToolsStore.setState({ systemTools: [], loading: false, error: undefined }); });

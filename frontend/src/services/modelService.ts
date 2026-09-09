@@ -2,15 +2,23 @@
 import api from './api';
 import { ModelConfig } from '../types/model';
 
-export const getModels = async () => {
-  const response = await api.get('/models');
+interface ModelDetailResponse {
+  status: string;
+  data?: ModelConfig | null;
+}
+
+export const getModels = async (options: { signal?: AbortSignal } = {}) => {
+  const response = await api.get<ModelConfig[]>('/models', options);
   return response.data;
 };
 
 export const getModelForEdit = async (modelName: string) => {
   const encodedModelName = encodeURIComponent(modelName);
-  const response = await api.get(`/models/${encodedModelName}`);
-  return response.data;
+  const response = await api.get<ModelDetailResponse>(`/models/${encodedModelName}`);
+  if (response.data.status !== 'success' || !response.data.data) {
+    throw new Error('Invalid model detail response');
+  }
+  return response.data.data;
 };
 
 export const addModel = async (model: ModelConfig) => {

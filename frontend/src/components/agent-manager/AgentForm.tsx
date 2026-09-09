@@ -1,3 +1,4 @@
+import type { FormInstance } from 'antd';
 import React, { useEffect } from 'react';
 import { Form, Input, Select, InputNumber, AutoComplete, Row, Col, Tag } from 'antd';
 import { AgentConfig, AgentCategoryItem } from '../../services/agentService';
@@ -11,7 +12,7 @@ const { TextArea } = Input;
 const { Option } = Select;
 
 interface AgentFormProps {
-  form: any;
+  form: FormInstance<AgentConfig>;
   initialValues?: AgentConfig;
   isEditing: boolean;
   models: string[];
@@ -30,7 +31,6 @@ const AgentForm: React.FC<AgentFormProps> = ({
   initialValues,
   isEditing,
   models,
-  systemTools,
   systemToolCategories,
   mcpServers,
   categories

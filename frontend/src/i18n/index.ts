@@ -2,7 +2,8 @@
 export type { Locale, TranslationNamespace, TranslationResource, I18nContextValue } from './types';
 
 // 导出 Context 和 Provider
-export { I18nProvider, useI18n } from './I18nContext';
+export { I18nProvider } from './I18nProvider';
+export { useI18n } from './context';
 
 // 导出自定义 Hooks
 export { useTranslation, useT } from './hooks';

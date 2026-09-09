@@ -96,7 +96,7 @@ export interface SaveFileRequest {
 export interface FileOperationResponse {
   success: boolean;
   message: string;
-  file?: any;
+  file?: { filename: string; size: number; version_id: string; created_at?: string; updated_at?: string };
 }
 
 /**

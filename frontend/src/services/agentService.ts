@@ -1,4 +1,5 @@
 import api from './api';
+import { collectPages } from '../utils/pagination';
 
 // Agent 配置接口
 export interface AgentConfig {
@@ -41,36 +42,50 @@ export interface AgentInCategoryItem {
   tags: string[];
 }
 
+export interface AgentListResponse { agents: AgentListItem[]; total_count: number; }
+export interface AgentCategoryResponse { success: boolean; categories: AgentCategoryItem[]; total_categories: number; }
+export interface AgentInCategoryResponse { success: boolean; category: string; agents: AgentInCategoryItem[]; total_count: number; }
+export interface AgentDetailResponse { status: string; agent: Agent; }
+export interface AgentMutationResponse { status: string; message: string; agent_name?: string; agent_id?: string; }
+
 // 列出 Agents
-export const listAgents = async (category?: string, limit = 100, skip = 0) => {
-  const params: any = { limit, skip };
+export const listAgents = async (category?: string, limit = 100, skip = 0, options: { signal?: AbortSignal } = {}) => {
+  const params: { limit: number; skip: number; category?: string } = { limit, skip };
   if (category) params.category = category;
 
-  const response = await api.get('/agent/list', { params });
+  const response = await api.get<AgentListResponse>('/agent/list', { params, ...options });
   return response.data;
 };
 
+export const listAllAgents = async (category?: string, options: { signal?: AbortSignal } = {}): Promise<AgentListResponse> => {
+  const result = await collectPages(async (limit, skip) => {
+    const page = await listAgents(category, limit, skip, options);
+    return { items: page.agents, total_count: page.total_count };
+  }, { pageSize: 100, keyOf: agent => agent.name, signal: options.signal });
+  return { agents: result.items, total_count: result.total_count };
+};
+
 // 获取 Agent 分类列表
-export const listCategories = async () => {
-  const response = await api.get('/agent/categories');
+export const listCategories = async (options: { signal?: AbortSignal } = {}) => {
+  const response = await api.get<AgentCategoryResponse>('/agent/categories', options);
   return response.data;
 };
 
 // 获取指定分类下的 Agents
 export const listAgentsInCategory = async (category: string) => {
-  const response = await api.get(`/agent/category/${category}`);
+  const response = await api.get<AgentInCategoryResponse>(`/agent/category/${encodeURIComponent(category)}`);
   return response.data;
 };
 
 // 获取 Agent 配置
 export const getAgent = async (agentName: string) => {
-  const response = await api.get(`/agent/${agentName}`);
+  const response = await api.get<AgentDetailResponse>(`/agent/${encodeURIComponent(agentName)}`);
   return response.data;
 };
 
 // 创建 Agent
 export const createAgent = async (agentConfig: AgentConfig) => {
-  const response = await api.post('/agent', {
+  const response = await api.post<AgentMutationResponse>('/agent', {
     agent_config: agentConfig
   });
   return response.data;
@@ -81,7 +96,7 @@ export const updateAgent = async (
   agentName: string,
   agentConfig: AgentConfig
 ) => {
-  const response = await api.put(`/agent/${agentName}`, {
+  const response = await api.put<AgentMutationResponse>(`/agent/${encodeURIComponent(agentName)}`, {
     agent_config: agentConfig
   });
   return response.data;
@@ -89,7 +104,7 @@ export const updateAgent = async (
 
 // 删除 Agent
 export const deleteAgent = async (agentName: string) => {
-  const response = await api.delete(`/agent/${agentName}`);
+  const response = await api.delete<AgentMutationResponse>(`/agent/${encodeURIComponent(agentName)}`);
   return response.data;
 };
 

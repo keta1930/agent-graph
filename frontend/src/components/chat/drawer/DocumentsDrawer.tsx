@@ -1,4 +1,5 @@
 // src/components/chat/drawer/DocumentsDrawer.tsx
+import { getErrorMessage } from '../../../utils/errors';
 import React from 'react';
 import { Drawer, List, Empty, Typography, Button, App } from 'antd';
 import { FileOutlined, FileTextOutlined, FileImageOutlined, FilePdfOutlined } from '@ant-design/icons';
@@ -76,8 +77,8 @@ const DocumentsDrawer: React.FC<DocumentsDrawerProps> = ({
       const blob = await conversationFileService.downloadAllFiles(conversationId);
       downloadBlob(blob, `conversation_${conversationId}_files.zip`);
       message.success(t('components.documentsDrawer.downloadAllSuccess'));
-    } catch (error: any) {
-      message.error(t('components.documentsDrawer.downloadAllFailed', { error: error.message }));
+    } catch (error) {
+      message.error(t('components.documentsDrawer.downloadAllFailed', { error: getErrorMessage(error) }));
     }
   };
 

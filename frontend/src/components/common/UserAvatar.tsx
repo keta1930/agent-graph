@@ -2,10 +2,10 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { message } from 'antd';
-import { getUserInfo, removeToken, isAdmin } from '../../utils/auth';
+import { getUserInfo, isAdmin } from '../../utils/auth';
 import { logout } from '../../services/authService';
 import { setUserLanguage } from '../../services/userSettingsService';
-import { UserOutlined, LogoutOutlined, SettingOutlined, TeamOutlined, GlobalOutlined } from '@ant-design/icons';
+import { LogoutOutlined, SettingOutlined, TeamOutlined, GlobalOutlined } from '@ant-design/icons';
 import { useI18n } from '../../i18n/I18nContext';
 import './UserAvatar.css';
 
@@ -22,7 +22,6 @@ export const UserAvatar: React.FC = () => {
     } catch (error) {
       console.error('Logout failed:', error);
     } finally {
-      removeToken();
       navigate('/login');
     }
   };

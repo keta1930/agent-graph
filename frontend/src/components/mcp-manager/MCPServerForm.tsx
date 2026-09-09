@@ -1,5 +1,5 @@
 // src/components/mcp-manager/MCPServerForm.tsx
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Form, Input, InputNumber, Switch, Select, Modal, Button, Typography, ConfigProvider } from 'antd';
 import { MCPServerConfig } from '../../types/mcp';
 import { useT } from '../../i18n/hooks';
@@ -7,10 +7,22 @@ import { useT } from '../../i18n/hooks';
 const { TextArea } = Input;
 const { Text } = Typography;
 
+interface MCPFields {
+  disabled: boolean;
+  timeout: number;
+  transportType: MCPServerConfig['transportType'];
+  command?: string;
+  url?: string;
+  serverName: string;
+  envText: string;
+  args: string;
+  autoApprove: string;
+}
+
 interface MCPServerFormProps {
   visible: boolean;
   onClose: () => void;
-  onSubmit: (serverName: string, config: MCPServerConfig) => void;
+  onSubmit: (serverName: string, config: MCPServerConfig) => Promise<void>;
   initialName?: string;
   initialValues?: MCPServerConfig;
   title: string;
@@ -25,86 +37,62 @@ const MCPServerForm: React.FC<MCPServerFormProps> = ({
   title,
 }) => {
   const t = useT();
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<MCPFields>();
+  const [submitting, setSubmitting] = useState(false);
+  const pending = useRef(false);
+  const session = useRef(0);
+  const record = useRef(initialValues);
+  record.current = initialValues;
   const transportType = Form.useWatch('transportType', form);
 
   useEffect(() => {
-    if (visible) {
-      if (initialValues) {
-        const formValues = { ...initialValues };
-        if (formValues.env && Object.keys(formValues.env).length > 0) {
-          const envText = Object.entries(formValues.env)
-            .map(([key, value]) => `${key}=${value}`)
-            .join('\n');
-          formValues.envText = envText;
-        }
-        form.setFieldsValue(formValues);
-      } else {
-        form.resetFields();
-        // Set default values
-        form.setFieldsValue({
-          disabled: false,
-          timeout: 60,
-          args: [],
-          autoApprove: [],
-          transportType: 'stdio',
-        });
-      }
-    }
-  }, [visible, initialValues, form]);
+    session.current++;
+    pending.current = false;
+    setSubmitting(false);
+    if (!visible) return;
+    const config = record.current;
+    form.resetFields();
+    form.setFieldsValue({
+      ...config,
+      serverName: initialName,
+      disabled: config?.disabled ?? false,
+      timeout: config?.timeout ?? 60,
+      transportType: config?.transportType ?? 'stdio',
+      command: config?.command ?? '',
+      url: config?.url ?? '',
+      args: config?.args?.join(', ') ?? '',
+      autoApprove: config?.autoApprove?.join(', ') ?? '',
+      envText: Object.entries(config?.env ?? {}).map(([key, value]) => key + '=' + value).join('\n'),
+    });
+  }, [visible, initialName, form]);
 
   const handleSubmit = async () => {
+    if (pending.current) return;
+    pending.current = true;
+    setSubmitting(true);
+    const owner = session.current;
     try {
-      const values = await form.validateFields();
-      const { serverName, envText, ...serverConfig } = values;
-
-      // Convert string arrays
-      if (typeof serverConfig.args === 'string') {
-        serverConfig.args = serverConfig.args.split(',').map((arg: string) => arg.trim()).filter((arg: string) => arg);
-      } else if (!Array.isArray(serverConfig.args)) {
-        serverConfig.args = [];
+      const { serverName, envText, args, autoApprove, ...values } = await form.validateFields();
+      const env: Record<string, string> = {};
+      for (const line of envText.split('\n')) {
+        const separator = line.indexOf('=');
+        if (separator > 0) env[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
       }
-
-      if (typeof serverConfig.autoApprove === 'string') {
-        serverConfig.autoApprove = serverConfig.autoApprove.split(',').map((tool: string) => tool.trim()).filter((tool: string) => tool);
-      } else if (!Array.isArray(serverConfig.autoApprove)) {
-        serverConfig.autoApprove = [];
-      }
-
-      if (envText && envText.trim()) {
-        const env: Record<string, string> = {};
-        const lines = envText.split('\n');
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (trimmedLine && trimmedLine.includes('=')) {
-            const [key, ...valueParts] = trimmedLine.split('=');
-            const value = valueParts.join('=');
-            if (key.trim() && value.trim()) {
-              env[key.trim()] = value.trim();
-            }
-          }
-        }
-        if (Object.keys(env).length > 0) {
-          serverConfig.env = env;
-        }
-      }
-
-      if (serverConfig.transportType === 'sse') {
-        delete serverConfig.command;
-        delete serverConfig.args;
-        delete serverConfig.base_url;
-      } else if (serverConfig.transportType === 'stdio') {
-        delete serverConfig.url;
-        delete serverConfig.base_url;
-      }
-
-      // 等待异步 onSubmit 完成，如果抛出错误会被外层 catch 捕获
-      await onSubmit(serverName, serverConfig as MCPServerConfig);
-      form.resetFields();
-    } catch (error) {
-      // 表单验证错误或 onSubmit 抛出的错误（包括版本冲突）
-      // 错误已在父组件处理（MCPManager），这里不重复处理
-      // 不重置表单，保留用户输入
+      const serverConfig: MCPServerConfig = {
+        ...values,
+        env,
+        args: args.split(',').map(value => value.trim()).filter(Boolean),
+        autoApprove: autoApprove.split(',').map(value => value.trim()).filter(Boolean),
+      };
+      if (serverConfig.transportType === 'stdio') delete serverConfig.url;
+      else { delete serverConfig.command; serverConfig.args = []; }
+      if (owner !== session.current) return;
+      await onSubmit(serverName, serverConfig);
+      if (owner === session.current) form.resetFields();
+    } catch {
+      // 父页面展示请求错误，当前编辑周期保留草稿。
+    } finally {
+      if (owner === session.current) { pending.current = false; setSubmitting(false); }
     }
   };
 
@@ -164,6 +152,7 @@ const MCPServerForm: React.FC<MCPServerFormProps> = ({
         </Button>,
         <Button
           key="submit"
+          loading={submitting}
           onClick={handleSubmit}
           style={{
             height: '36px',

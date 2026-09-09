@@ -1,8 +1,7 @@
-// src/pages/ChatSystem.tsx
-import React, { useState, useEffect, useCallback } from 'react';
-import { Button, Dropdown, Menu, Tooltip, App } from 'antd';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { Button, Dropdown, Tooltip, App, Spin } from 'antd';
 import { CompressOutlined, DownOutlined, FileOutlined } from '@ant-design/icons';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import ConversationSidebar from '../components/chat/sidebar/ConversationSidebar';
 import ModeSelector from '../components/chat/input/ModeSelector';
 import MessageDisplay from '../components/chat/message/MessageDisplay';
@@ -16,610 +15,282 @@ import { useSSEConnection } from '../hooks/useSSEConnection';
 import { useT } from '../i18n/hooks';
 import { useGlobalNotification } from '../hooks/useGlobalNotification';
 import { ConversationService, generateMongoId } from '../services/conversationService';
-import { ConversationMode, ConversationDetail } from '../types/conversation';
+import type { ChatInputConfig, ChatSubmitOptions, ConversationMode, ConversationDetail, InputConfig } from '../types/conversation';
+import { getSessionGeneration, isCurrentSession } from '../utils/authSession';
+import { getErrorMessage } from '../utils/errors';
 import ShareButton from '../components/chat/ShareButton';
 import ShareModal from '../components/chat/ShareModal';
 import { useTour, chatTourSteps } from '../components/tour';
 import '../components/tour/tour-custom.css';
 import '../styles/chat-system.css';
 
+function inputConfig(options: ChatSubmitOptions): InputConfig {
+  return {
+    selected_model: options.model_name, selected_graph: options.graph_name, system_prompt: options.system_prompt,
+    selected_mcp_servers: options.mcp_servers ?? [], selected_agent: options.agent_name ?? null,
+    selected_system_tools: options.system_tools ?? [], max_iterations: options.max_iterations ?? null
+  };
+}
+function inheritedInput(config?: InputConfig): ChatInputConfig {
+  return {
+    selectedModel: config?.selected_model, selectedGraph: config?.selected_graph, systemPrompt: config?.system_prompt,
+    selectedMCPServers: config?.selected_mcp_servers ?? [], selectedAgent: config?.selected_agent,
+    selectedSystemTools: config?.selected_system_tools ?? [], maxIterations: config?.max_iterations
+  };
+}
+
 const ChatSystem: React.FC = () => {
-  const { conversationId: urlConversationId } = useParams<{ conversationId?: string }>();
+  const { conversationId: activeConversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const t = useT();
   const { message } = App.useApp();
-  const [activeConversationId, setActiveConversationId] = useState<string | undefined>();
-  // 用于处理正在进行的对话，避免全局状态泄露
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
-  // 临时对话数据，用于新建对话时的数据管理
   const [temporaryConversation, setTemporaryConversation] = useState<ConversationDetail | null>(null);
-  // 当前选择的图名称（用于Graph模式）
-  const [selectedGraphName, setSelectedGraphName] = useState<string>('');
-  // 从新建对话界面迁移的配置
-  const [inheritedConfig, setInheritedConfig] = useState<{
-    selectedModel?: string;
-    selectedGraph?: string;
-    systemPrompt?: string;
-    selectedMCPServers?: string[];
-    selectedAgent?: string | null;
-    selectedSystemTools?: string[];
-    maxIterations?: number | null;
-  }>({});
-  // 压缩相关状态
+  const [selectedGraphName, setSelectedGraphName] = useState('');
+  const [inheritedConfig, setInheritedConfig] = useState<ChatInputConfig>({});
+  const [starting, setStarting] = useState(false);
+  const startingRef = useRef(false);
+  const submissionRef = useRef<symbol | null>(null);
   const [compactConfigVisible, setCompactConfigVisible] = useState(false);
   const [selectedCompactType, setSelectedCompactType] = useState<'brutal' | 'precise'>('precise');
-  // 使用Set来跟踪正在压缩的对话ID，这样每个对话都有独立的压缩状态
   const [compactingConversations, setCompactingConversations] = useState<Set<string>>(new Set());
-  // Documents 抽屉状态
   const [documentsDrawerVisible, setDocumentsDrawerVisible] = useState(false);
-  // 文件查看模态框状态
   const [fileViewModalVisible, setFileViewModalVisible] = useState(false);
   const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
-  // 分享相关状态
   const [shareModalVisible, setShareModalVisible] = useState(false);
-  const [shareUrl, setShareUrl] = useState<string>('');
-  const [shareId, setShareId] = useState<string>('');
+  const [shareUrl, setShareUrl] = useState('');
+  const [shareId, setShareId] = useState('');
   const [shareLoading, setShareLoading] = useState(false);
-
-  const {
-    currentConversation,
-    currentMode,
-    loadConversationDetail,
-    clearCurrentConversation,
-    setCurrentMode,
-    silentUpdateConversations
-  } = useConversationStore();
-
-  const {
-    streamingState,
-    enhancedStreamingState,
-    startConnection,
-    closeConnection
-  } = useSSEConnection();
-
-
-
-  // 全局通知管理
-  const {
-    notifications,
-    removeNotification,
-    success: showSuccessNotification
-  } = useGlobalNotification();
-
-  // 引导演示 - 首次访问自动启动
-  const { startTour } = useTour({
-    steps: chatTourSteps,
-    onComplete: () => {
-      localStorage.setItem('chat-tour-completed', 'true');
-    }
-  });
-
-  // 首次访问时自动启动引导
-  useEffect(() => {
-    const tourCompleted = localStorage.getItem('chat-tour-completed');
-    if (!tourCompleted) {
-      // 延迟启动，确保页面完全加载
-      const timer = setTimeout(() => {
-        startTour();
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [startTour]);
-
-  // 处理URL参数变化 - 简化逻辑，避免破坏现有状态管理
-  useEffect(() => {
-    // 仅在初始加载时处理URL参数，避免运行时的竞态条件
-    if (urlConversationId && urlConversationId !== activeConversationId) {
-      // 使用现有的handleConversationSelect逻辑，但延迟执行避免初始化问题
-      const timer = setTimeout(() => {
-        setActiveConversationId(urlConversationId);
-        loadConversationDetail(urlConversationId);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [urlConversationId]); // 移除activeConversationId依赖，避免循环
-
-  // 获取当前显示的对话（优先临时对话，其次当前对话）
-  const getDisplayConversation = useCallback((): ConversationDetail | null => {
-    if (temporaryConversation && temporaryConversation.conversation_id === activeConversationId) {
-      return temporaryConversation;
-    }
-    return currentConversation;
-  }, [temporaryConversation, currentConversation, activeConversationId]);
-
-  // 创建临时对话数据结构
-  const createTemporaryConversation = useCallback((conversationId: string, title: string, mode: ConversationMode): ConversationDetail => {
-    // 根据模式确定type
-    const conversationType = mode === 'graph' ? 'graph' : 'agent';
-
-    return {
-      conversation_id: conversationId,
-      title,
-      rounds: [],
-      type: conversationType
-    };
+  const currentConversation = useConversationStore(state => state.currentConversation);
+  const currentConversationLoading = useConversationStore(state => state.currentConversationLoading);
+  const currentMode = useConversationStore(state => state.currentMode);
+  const loadConversationDetail = useConversationStore(state => state.loadConversationDetail);
+  const clearCurrentConversation = useConversationStore(state => state.clearCurrentConversation);
+  const setCurrentMode = useConversationStore(state => state.setCurrentMode);
+  const silentUpdateConversations = useConversationStore(state => state.silentUpdateConversations);
+  const patchCurrentConversation = useConversationStore(state => state.patchCurrentConversation);
+  const { streamingState, enhancedStreamingState, startConnection, closeConnection, resetStreamingState } = useSSEConnection();
+  const { notifications, removeNotification, success: showSuccessNotification } = useGlobalNotification();
+  const selectionRef = useRef<{ id?: string; session: number }>({ id: activeConversationId, session: getSessionGeneration() });
+  const expectedNavigationRef = useRef<{ submission: symbol; ids: Set<string> } | null>(null);
+  const initializedConfigRef = useRef<string | undefined>(undefined);
+  // history 已更新时 React 路由可能仍在过渡；接管前输入会随会话 key 重建。
+  const routeAdoptionPending = expectedNavigationRef.current !== null && selectionRef.current.id !== activeConversationId;
+  const displayConversationId = routeAdoptionPending ? selectionRef.current.id : activeConversationId;
+  const mountedRef = useRef(true);
+  const captureOwnership = useCallback(() => {
+    const selection = selectionRef.current;
+    return () => mountedRef.current && selectionRef.current === selection && isCurrentSession(selection.session);
   }, []);
 
-  // 处理对话选择
-  const handleConversationSelect = useCallback(async (conversationId: string) => {
-    if (conversationId === activeConversationId) return;
-
-    // 停止当前的SSE连接
-    closeConnection();
-
-    // 清除待发送消息状态和临时对话
-    setPendingUserMessage(null);
-    setTemporaryConversation(null);
-    setSelectedGraphName('');
-
-    // 先设置新的活跃对话ID并加载新对话，不清除当前对话以避免闪烁
-    setActiveConversationId(conversationId);
-
-    // 更新URL
-    navigate(`/chat/${conversationId}`, { replace: true });
-
-    await loadConversationDetail(conversationId);
-
-    // 需要等待对话加载完成后根据对话类型设置模式
-    // 这个逻辑应该在对话加载完成后的useEffect中处理
-  }, [activeConversationId, closeConnection, loadConversationDetail, navigate]);
-
-  // 处理新建对话
-  const handleNewConversation = useCallback(() => {
-    // 停止当前的SSE连接
-    closeConnection();
-
-    // 清除待发送消息状态和临时对话
-    setPendingUserMessage(null);
-    setTemporaryConversation(null);
-    setSelectedGraphName('');
-    setInheritedConfig({}); // 清除继承的配置
-
-    // 清除当前对话
-    clearCurrentConversation();
-    setActiveConversationId(undefined);
-
-    // 更新URL到基础聊天页面
-    navigate('/chat', { replace: true });
-
-    // 重置为默认模式
-    setCurrentMode('agent');
-  }, [closeConnection, clearCurrentConversation, setCurrentMode, navigate]);
-
-  // 当对话加载完成后，根据对话类型设置正确的模式（不可变）
+  const { startTour } = useTour({
+    steps: chatTourSteps,
+    onComplete: () => { try { localStorage.setItem('chat-tour-completed', 'true'); } catch { /* 引导完成不依赖存储可用性。 */ } }
+  });
   useEffect(() => {
-    if (currentConversation && !temporaryConversation) {
-      // 根据对话的type设置模式
-      if (currentConversation.type === 'graph') {
-        setCurrentMode('graph');
-      } else if (currentConversation.type === 'agent') {
-        setCurrentMode('agent');
-      }
+    let completed = false;
+    try { completed = localStorage.getItem('chat-tour-completed') === 'true'; } catch { /* 存储不可用时保留引导。 */ }
+    if (completed) return;
+    const timer = setTimeout(startTour, 1000);
+    return () => clearTimeout(timer);
+  }, [startTour]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
-      // 从对话详情中恢复输入配置
-      setInheritedConfig({
-        selectedModel: currentConversation.input_config?.selected_model,
-        selectedGraph: currentConversation.input_config?.selected_graph,
-        systemPrompt: currentConversation.input_config?.system_prompt,
-        selectedMCPServers: currentConversation.input_config?.selected_mcp_servers || [],
-        selectedAgent: currentConversation.input_config?.selected_agent,
-        selectedSystemTools: currentConversation.input_config?.selected_system_tools || [],
-        maxIterations: currentConversation.input_config?.max_iterations
-      });
-
-      // 对话加载完成后，平滑滚动到底部
-      setTimeout(() => {
-        const messageDisplay = document.querySelector('.message-display');
-        if (messageDisplay) {
-          messageDisplay.scrollTo({
-            top: (messageDisplay as HTMLElement).scrollHeight,
-            behavior: 'smooth'
-          });
-        }
-      }, 100);
+  // URL 切换统一使旧回调失效；服务端新建 ID 的确认属于同一次执行。
+  useLayoutEffect(() => {
+    const expected = expectedNavigationRef.current;
+    // 停止生成使旧提交失效，但不撤销已经请求的同会话路由接管。
+    if (activeConversationId && expected && (expected.submission === submissionRef.current || submissionRef.current === null) && isCurrentSession(selectionRef.current.session) && expected.ids.delete(activeConversationId)) {
+      if (activeConversationId === selectionRef.current.id) expectedNavigationRef.current = null;
+      return;
     }
-  }, [currentConversation, setCurrentMode, temporaryConversation]);
-
-  // 处理模式选择
-  const handleModeSelect = useCallback((mode: ConversationMode) => {
-    setCurrentMode(mode);
-    // 清除当前对话和临时对话，准备开始新对话
+    expectedNavigationRef.current = null;
+    selectionRef.current = { id: activeConversationId, session: getSessionGeneration() };
+    startingRef.current = false;
+    submissionRef.current = null;
+    initializedConfigRef.current = undefined;
+    closeConnection();
+    resetStreamingState();
     clearCurrentConversation();
+    setStarting(false);
+    setPendingUserMessage(null);
     setTemporaryConversation(null);
     setSelectedGraphName('');
-    setInheritedConfig({}); // 清除继承的配置
-    setActiveConversationId(undefined);
-    // 清除待发送消息状态
-    setPendingUserMessage(null);
-  }, [setCurrentMode, clearCurrentConversation]);
+    setInheritedConfig({});
+    setCompactConfigVisible(false);
+    setDocumentsDrawerVisible(false);
+    setFileViewModalVisible(false);
+    setSelectedFilename(null);
+    setShareModalVisible(false);
+    setShareLoading(false);
+    setCompactingConversations(new Set());
+    if (activeConversationId) void loadConversationDetail(activeConversationId);
+    else setCurrentMode('agent');
+  }, [activeConversationId, location.key, clearCurrentConversation, closeConnection, loadConversationDetail, resetStreamingState, setCurrentMode]);
 
-  // 开始新对话
-  const handleStartConversation = useCallback(async (inputText: string, options: any = {}) => {
-    try {
-      // 立即生成对话ID和确定模式
-      const conversationId = generateMongoId();
-      const conversationMode = options.mode || currentMode;
-      const isGraphMode = conversationMode === 'graph';
+  useEffect(() => {
+    if (!activeConversationId || currentConversation?.conversation_id !== activeConversationId || temporaryConversation) return;
+    setCurrentMode(currentConversation.type);
+    if (initializedConfigRef.current !== activeConversationId) {
+      initializedConfigRef.current = activeConversationId;
+      setInheritedConfig(inheritedInput(currentConversation.input_config));
+      setSelectedGraphName(currentConversation.input_config?.selected_graph ?? '');
+    }
+  }, [activeConversationId, currentConversation, setCurrentMode, temporaryConversation]);
 
-      // 记录选择的Graph名称
-      if (isGraphMode && options.graph_name) {
-        setSelectedGraphName(options.graph_name);
+  const getDisplayConversation = useCallback(() => {
+    if (temporaryConversation?.conversation_id === displayConversationId) return temporaryConversation;
+    return currentConversation?.conversation_id === displayConversationId ? currentConversation : null;
+  }, [displayConversationId, currentConversation, temporaryConversation]);
+  const cancelSubmissionForNavigation = useCallback(() => {
+    submissionRef.current = null;
+    expectedNavigationRef.current = null;
+    closeConnection();
+  }, [closeConnection]);
+  const handleConversationSelect = useCallback((id: string) => {
+    if (id === activeConversationId) return;
+    cancelSubmissionForNavigation();
+    navigate(`/chat/${id}`);
+  }, [activeConversationId, cancelSubmissionForNavigation, navigate]);
+  const handleNewConversation = useCallback(() => {
+    cancelSubmissionForNavigation();
+    navigate('/chat');
+  }, [cancelSubmissionForNavigation, navigate]);
+  const handleModeSelect = useCallback((mode: ConversationMode) => { setCurrentMode(mode); }, [setCurrentMode]);
+
+  const submit = useCallback(async (text: string, options: ChatSubmitOptions = {}, isNew = false) => {
+    if (startingRef.current || streamingState.isStreaming || (expectedNavigationRef.current && selectionRef.current.id !== activeConversationId)) return;
+    const ownsSelection = captureOwnership();
+    const submission = Symbol();
+    submissionRef.current = submission;
+    expectedNavigationRef.current = null;
+    const owns = () => ownsSelection() && submissionRef.current === submission;
+    const selection = selectionRef.current;
+    let targetId = isNew ? generateMongoId() : activeConversationId;
+    if (!targetId) return;
+    const mode = options.mode ?? currentMode;
+    const config = inputConfig(options);
+    startingRef.current = true;
+    setStarting(true);
+    const adoptId = (id: string) => {
+      targetId = id;
+      selection.id = id;
+      // 临时 URL 尚未提交时可能收到真实 ID，两次接管都属于当前提交。
+      if (expectedNavigationRef.current?.submission !== submission) {
+        expectedNavigationRef.current = { submission, ids: new Set() };
       }
-
-      // 保存从新建对话界面继承的配置，确保所有参数都被保存
-      setInheritedConfig({
-        selectedModel: options.model_name || options.selectedModel,
-        selectedGraph: options.graph_name,
-        systemPrompt: options.system_prompt || options.systemPrompt,
-        selectedMCPServers: options.mcp_servers || options.selectedMCPServers || [],
-        selectedAgent: options.agent_name || null,
-        selectedSystemTools: options.system_tools || [],
-        maxIterations: options.max_iterations || null
-      });
-
-      // 立即设置活跃对话ID，界面立即切换到对话模式
-      setActiveConversationId(conversationId);
-
-      // 更新URL
-      navigate(`/chat/${conversationId}`, { replace: true });
-
-      // 创建临时对话数据结构
-      const tempConversation = createTemporaryConversation(
-        conversationId,
-        t('pages.chatSystem.newConversation'),
-        conversationMode
-      );
-      setTemporaryConversation(tempConversation);
-
-      // 只设置待发送的用户消息，不创建临时对话
-      // 这样可以避免重复显示用户消息
-      setPendingUserMessage(inputText);
-
-      // 用于保存实际的对话ID（Graph模式时由后端生成）
-      let actualConversationId = conversationId;
-
-      // 异步启动SSE连接（不等待完成）
-      startConnection(inputText, {
-        // Graph模式新对话时不传递conversationId，让后端创建新的
-        conversationId: isGraphMode ? undefined : conversationId,
-        mode: conversationMode,
-        // Agent 模式参数
-        agent_name: options.agent_name,
-        model_name: options.model_name || options.selectedModel,
-        system_prompt: options.system_prompt || options.systemPrompt,
-        mcp_servers: options.mcp_servers || options.selectedMCPServers || [],
-        system_tools: options.system_tools || [],
-        max_iterations: options.max_iterations,
-        project_id: options.project_id,
-        user_prompt: options.user_prompt || inputText,
-        files: options.files || [],
-        // Graph 模式参数
-        graph_name: options.graph_name,
-        onConversationCreated: (backendConversationId: string) => {
-          // Graph模式时更新实际的对话ID和标题
-          if (isGraphMode) {
-            actualConversationId = backendConversationId;
-            // 异步更新状态，避免在渲染期间调用setState
-            setTimeout(() => {
-              setActiveConversationId(backendConversationId);
-              // 更新URL到新的对话ID
-              navigate(`/chat/${backendConversationId}`, { replace: true });
-              // 更新临时对话的ID和标题
-              setTemporaryConversation(prev => prev ? {
-                ...prev,
-                conversation_id: backendConversationId,
-                title: backendConversationId // 使用conversation_id作为标题
-              } : null);
-            }, 0);
+      expectedNavigationRef.current.ids.add(id);
+      initializedConfigRef.current = id;
+      navigate(`/chat/${id}`, { replace: true });
+    };
+    try {
+      await startConnection(text, {
+        ...options, mode, conversationId: isNew && mode === 'graph' ? undefined : targetId,
+        onOpen: () => {
+          if (!owns()) return;
+          setPendingUserMessage(text);
+          if (!isNew && targetId) patchCurrentConversation(targetId, {});
+          if (isNew && targetId) {
+            clearCurrentConversation();
+            setTemporaryConversation({ conversation_id: targetId, title: t('pages.chatSystem.newConversation'), rounds: [], type: mode });
+            setInheritedConfig(inheritedInput(config));
+            setSelectedGraphName(options.graph_name ?? '');
+            adoptId(targetId);
           }
         },
-        onTitleUpdate: (titleData: { title?: string; tags?: string[]; conversation_id?: string }) => {
-          // 实时更新标题和标签
-          setTimeout(() => {
-            if (titleData.title) {
-              // 更新临时对话的标题
-              setTemporaryConversation(prev => prev ? {
-                ...prev,
-                title: titleData.title!
-              } : null);
-              
-              // 如果有当前对话，也更新它
-              if (currentConversation && currentConversation.conversation_id === (titleData.conversation_id || actualConversationId)) {
-                useConversationStore.getState().updateCurrentConversationTemporarily({
-                  ...currentConversation,
-                  title: titleData.title
-                });
-              }
-            }
-            
-            // 静默更新对话列表以反映标题变化
-            silentUpdateConversations();
-          }, 0);
+        onConversationCreated: id => {
+          if (!owns() || !isNew || mode !== 'graph') return;
+          adoptId(id);
+          setTemporaryConversation(previous => previous ? { ...previous, conversation_id: id } : previous);
+        },
+        onTitleUpdate: data => {
+          if (!owns() || !targetId || (data.conversation_id && data.conversation_id !== targetId)) return;
+          if (data.title) {
+            const title = data.title;
+            patchCurrentConversation(targetId, { title });
+            setTemporaryConversation(previous => previous && previous.conversation_id === targetId ? { ...previous, title } : previous);
+          }
+          void silentUpdateConversations();
         },
         onComplete: async () => {
-          // 异步执行状态更新，避免在渲染期间调用setState
-          setTimeout(async () => {
-            // 保存输入配置到后端
-            try {
-              const configToSave = {
-                selected_model: options.model_name || options.selectedModel,
-                selected_graph: options.graph_name,
-                system_prompt: options.system_prompt || options.systemPrompt,
-                selected_mcp_servers: options.mcp_servers || options.selectedMCPServers || [],
-                selected_agent: options.agent_name || null,
-                selected_system_tools: options.system_tools || [],
-                max_iterations: options.max_iterations || null
-              };
-              await ConversationService.updateInputConfig(actualConversationId, configToSave);
-            } catch (error) {
-              console.error(t('pages.chatSystem.errors.saveConfigFailed'), error);
-              // 不影响主流程，只记录错误
-            }
-            
-            // 重新加载对话详情以获取最新内容，确保消息不会消失
-            await loadConversationDetail(actualConversationId);
-            // 清除待发送消息状态和临时对话
+          if (!owns() || !targetId) return;
+          const completedId = targetId;
+          try { await ConversationService.updateInputConfig(completedId, config); }
+          catch (error) { if (owns()) message.warning(getErrorMessage(error, t('pages.chatSystem.errors.saveConfigFailed'))); }
+          if (!owns()) return;
+          await loadConversationDetail(completedId);
+          if (!owns()) return;
+          if (useConversationStore.getState().currentConversation?.conversation_id === completedId && !useConversationStore.getState().error) {
             setPendingUserMessage(null);
             setTemporaryConversation(null);
-            // 静默更新对话列表以显示新对话
-            silentUpdateConversations();
-          }, 0);
+            resetStreamingState();
+          }
+          void silentUpdateConversations();
         },
-        onError: (error) => {
-          // 异步执行状态更新，避免在渲染期间调用setState
-          setTimeout(() => {
-            // 清除待发送消息状态和临时对话
-            setPendingUserMessage(null);
-            setTemporaryConversation(null);
-            message.error(`${t('pages.chatSystem.errors.connectionError')}: ${error}`);
-          }, 0);
-        }
-      }).catch(error => {
-        console.error(t('pages.chatSystem.errors.startConnectionFailed'), error);
-        setPendingUserMessage(null);
-        setTemporaryConversation(null);
-        message.error(t('pages.chatSystem.errors.startConversationFailed'));
+        onError: error => { if (owns()) message.error(`${t('pages.chatSystem.errors.connectionError')}: ${error}`); }
       });
-
-    } catch (error) {
-      console.error(t('pages.chatSystem.errors.startConversationFailed'), error);
-      // 异步执行状态更新，避免在渲染期间调用setState
-      setTimeout(() => {
-        message.error(t('pages.chatSystem.errors.startConversationFailed'));
-        setPendingUserMessage(null);
-        setTemporaryConversation(null);
-      }, 0);
-    }
-  }, [currentMode, startConnection, loadConversationDetail, silentUpdateConversations, createTemporaryConversation, navigate, t]);
-
-  // 发送消息
-  const handleSendMessage = useCallback(async (messageText: string, options: any = {}) => {
-    if (!activeConversationId) {
-      // 如果没有活跃对话，开始新对话
-      await handleStartConversation(messageText, options);
-      return;
-    }
-
-    try {
-      // 设置待发送的用户消息（局部状态，不影响其他对话）
-      setPendingUserMessage(messageText);
-
-      await startConnection(messageText, {
-        mode: currentMode,
-        conversationId: activeConversationId,
-        // Agent 模式参数 - 支持配置覆盖和工具扩展
-        agent_name: options.agent_name,
-        model_name: options.model_name,
-        system_prompt: options.system_prompt,
-        mcp_servers: options.mcp_servers || [],
-        system_tools: options.system_tools || [],
-        max_iterations: options.max_iterations,
-        user_prompt: messageText,
-        // Graph 模式参数
-        graph_name: options.graph_name,
-        ...options,
-        onTitleUpdate: (titleData: { title?: string; tags?: string[]; conversation_id?: string }) => {
-          // 实时更新标题和标签
-          setTimeout(() => {
-            if (titleData.title && currentConversation) {
-              // 更新当前对话的标题
-              useConversationStore.getState().updateCurrentConversationTemporarily({
-                ...currentConversation,
-                title: titleData.title
-              });
-            }
-            
-            // 静默更新对话列表以反映标题变化
-            silentUpdateConversations();
-          }, 0);
-        },
-        onComplete: async () => {
-          // 异步执行状态更新，避免在渲染期间调用setState
-          setTimeout(async () => {
-            // 保存输入配置到后端（如果有配置变更）
-            try {
-              const configToSave = {
-                selected_model: options.model_name,
-                selected_graph: options.graph_name,
-                system_prompt: options.system_prompt,
-                selected_mcp_servers: options.mcp_servers || [],
-                selected_agent: options.agent_name || null,
-                selected_system_tools: options.system_tools || [],
-                max_iterations: options.max_iterations || null
-              };
-              // 只有当配置不为空时才保存
-              if (Object.values(configToSave).some(v => v !== undefined && v !== null && (Array.isArray(v) ? v.length > 0 : true))) {
-                await ConversationService.updateInputConfig(activeConversationId, configToSave);
-              }
-            } catch (error) {
-              console.error(t('pages.chatSystem.errors.saveConfigFailed'), error);
-              // 不影响主流程，只记录错误
-            }
-            
-            // 重新加载对话详情以获取最新内容，确保消息不会消失
-            await loadConversationDetail(activeConversationId);
-            // 清除待发送消息状态和临时对话
-            setPendingUserMessage(null);
-            setTemporaryConversation(null);
-            // 保持 inheritedConfig 不变，让配置在整个对话期间持续有效
-            // 静默更新对话列表以反映最新状态
-            silentUpdateConversations();
-          }, 0);
-        },
-        onError: (error) => {
-          // 异步执行状态更新，避免在渲染期间调用setState
-          setTimeout(() => {
-            message.error(`${t('pages.chatSystem.errors.sendFailed')}: ${error}`);
-            // 清除待发送消息状态
-            setPendingUserMessage(null);
-            // 出错时保持当前状态，不重新加载对话以避免打断用户体验
-          }, 0);
-        }
-      });
-    } catch (error) {
-      console.error(t('pages.chatSystem.errors.sendMessageFailed'), error);
-      // 异步执行状态更新，避免在渲染期间调用setState
-      setTimeout(() => {
-        message.error(t('pages.chatSystem.errors.sendMessageFailed'));
-        // 清除待发送消息状态
-        setPendingUserMessage(null);
-      }, 0);
-    }
-  }, [activeConversationId, currentMode, startConnection, handleStartConversation, loadConversationDetail, silentUpdateConversations, t]);
-
-  // 处理压缩类型选择
-  const handleCompactTypeSelect = useCallback((compactType: 'brutal' | 'precise') => {
-    const displayConversation = getDisplayConversation();
-    if (!activeConversationId || !displayConversation) {
-      message.error(t('pages.chatSystem.errors.noConversationSelected'));
-      return;
-    }
-
-    // 压缩功能现在支持所有对话类型
-    setSelectedCompactType(compactType);
-    setCompactConfigVisible(true);
-  }, [activeConversationId, getDisplayConversation, t]);
-
-  // 执行对话压缩
-  const handleCompactConfirm = useCallback(async (config: { modelName: string; compactType: 'brutal' | 'precise'; threshold: number }) => {
-    const displayConversation = getDisplayConversation();
-    if (!activeConversationId || !displayConversation) {
-      message.error(t('pages.chatSystem.errors.noConversationSelected'));
-      return;
-    }
-
-    setCompactConfigVisible(false);
-
-    // 将当前对话ID添加到压缩中的对话集合
-    setCompactingConversations(prev => new Set(prev).add(activeConversationId));
-
-    try {
-      const result = await ConversationService.compactConversation(
-        activeConversationId,
-        config.modelName,
-        config.compactType,
-        config.threshold
-      );
-
-      if (result.status === 'success') {
-        // 显示全局玻璃拟态通知
-        showSuccessNotification(
-          t('pages.chatSystem.messages.compactComplete', { title: displayConversation.title }),
-          undefined, // 不显示详细信息
-          4000
-        );
-        // 重新加载对话详情以获取压缩后的内容
-        await loadConversationDetail(activeConversationId);
-        // 清除临时对话
-        setTemporaryConversation(null);
-      } else {
-        message.error(result.message || t('pages.chatSystem.errors.compactFailed'));
-      }
-    } catch (error) {
-      console.error(t('pages.chatSystem.errors.compactConversationFailed'), error);
-      message.error(t('pages.chatSystem.errors.compactConversationFailed'));
     } finally {
-      // 从压缩中的对话集合中移除当前对话ID
-      setCompactingConversations(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(activeConversationId);
-        return newSet;
-      });
+      if (owns()) { startingRef.current = false; setStarting(false); }
     }
-  }, [activeConversationId, getDisplayConversation, loadConversationDetail, t, showSuccessNotification]);
+  }, [activeConversationId, captureOwnership, clearCurrentConversation, currentMode, loadConversationDetail, message, navigate, patchCurrentConversation, resetStreamingState, silentUpdateConversations, startConnection, streamingState.isStreaming, t]);
+  const handleStartConversation = useCallback((text: string, options?: ChatSubmitOptions) => submit(text, options, true), [submit]);
+  const handleSendMessage = useCallback((text: string, options?: ChatSubmitOptions) => submit(text, options, !activeConversationId), [activeConversationId, submit]);
 
-  // 处理分享按钮点击
+  const handleCompactTypeSelect = useCallback((compactType: 'brutal' | 'precise') => {
+    if (!activeConversationId || !getDisplayConversation()) { message.error(t('pages.chatSystem.errors.noConversationSelected')); return; }
+    setSelectedCompactType(compactType); setCompactConfigVisible(true);
+  }, [activeConversationId, getDisplayConversation, message, t]);
+  const handleCompactConfirm = useCallback(async (config: { modelName: string; compactType: 'brutal' | 'precise'; threshold: number }) => {
+    const conversation = getDisplayConversation();
+    if (!activeConversationId || !conversation) return;
+    const id = activeConversationId;
+    const owns = captureOwnership();
+    setCompactConfigVisible(false);
+    setCompactingConversations(previous => new Set(previous).add(id));
+    try {
+      const result = await ConversationService.compactConversation(id, config.modelName, config.compactType, config.threshold);
+      if (!owns()) return;
+      if (result.status !== 'success') { message.error(result.message || t('pages.chatSystem.errors.compactFailed')); return; }
+      showSuccessNotification(t('pages.chatSystem.messages.compactComplete', { title: conversation.title }), undefined, 4000);
+      await loadConversationDetail(id);
+      if (owns()) setTemporaryConversation(null);
+    } catch (error) { if (owns()) message.error(getErrorMessage(error, t('pages.chatSystem.errors.compactConversationFailed'))); }
+    finally { if (owns()) setCompactingConversations(previous => { const next = new Set(previous); next.delete(id); return next; }); }
+  }, [activeConversationId, captureOwnership, getDisplayConversation, loadConversationDetail, message, showSuccessNotification, t]);
+
   const handleShareClick = useCallback(async () => {
-    if (!activeConversationId) {
-      message.error(t('pages.chatSystem.errors.noConversationSelected'));
-      return;
-    }
-
+    if (!activeConversationId || shareLoading) return;
+    const owns = captureOwnership();
     setShareLoading(true);
     try {
-      // 检查对话是否已分享
-      const statusResponse = await ConversationService.getShareStatus(activeConversationId);
-      
-      if (statusResponse.is_shared && statusResponse.share_info) {
-        // 已分享，显示现有分享链接
-        const fullUrl = `${window.location.origin}/share/${statusResponse.share_info.share_id}`;
-        setShareUrl(fullUrl);
-        setShareId(statusResponse.share_info.share_id);
-        setShareModalVisible(true);
-      } else {
-        // 未分享，创建新的分享链接
-        const createResponse = await ConversationService.createShare(activeConversationId);
-        const fullUrl = `${window.location.origin}/share/${createResponse.share_id}`;
-        setShareUrl(fullUrl);
-        setShareId(createResponse.share_id);
-        setShareModalVisible(true);
+      const status = await ConversationService.getShareStatus(activeConversationId);
+      if (!owns()) return;
+      let id = status.share_info?.share_id;
+      if (!status.is_shared || !id) {
+        const response = await ConversationService.createShare(activeConversationId);
+        if (!owns()) return;
+        id = response.share_id;
         message.success(t('pages.chatSystem.share.createSuccess'));
       }
-    } catch (error: any) {
-      console.error('分享失败:', error);
-      if (error.response?.status === 403) {
-        message.error(t('pages.chatSystem.share.permissionDenied'));
-      } else {
-        message.error(t('pages.chatSystem.share.shareFailed', { error: error.message }));
-      }
-    } finally {
-      setShareLoading(false);
-    }
-  }, [activeConversationId, t]);
-
-  // 处理删除分享
+      setShareUrl(`${window.location.origin}/share/${id}`); setShareId(id); setShareModalVisible(true);
+    } catch (error) { if (owns()) message.error(getErrorMessage(error, t('pages.chatSystem.share.shareFailed'))); }
+    finally { if (owns()) setShareLoading(false); }
+  }, [activeConversationId, captureOwnership, message, shareLoading, t]);
   const handleDeleteShare = useCallback(async () => {
     if (!shareId) return;
+    const owns = captureOwnership();
+    await ConversationService.deleteShare(shareId);
+    if (!owns()) return;
+    setShareModalVisible(false); setShareUrl(''); setShareId('');
+  }, [captureOwnership, shareId]);
 
-    try {
-      await ConversationService.deleteShare(shareId);
-      setShareModalVisible(false);
-      setShareUrl('');
-      setShareId('');
-    } catch (error: any) {
-      // 抛出错误，让ShareModal的catch块能捕获并显示错误消息
-      throw error;
-    }
-  }, [shareId]);
-
-  // 获取主对话区域的样式
-  const getMainAreaStyle = () => {
-    return 'main-conversation-area';
-  };
-
-  // 获取当前显示的对话
   const displayConversation = getDisplayConversation();
-
-  // 获取显示标题
-  const getDisplayTitle = () => {
-    if (displayConversation?.title) {
-      return displayConversation.title;
-    }
-    if (pendingUserMessage) {
-      return t('pages.chatSystem.newConversation');
-    }
-    return '';
-  };
+  const getDisplayTitle = () => displayConversation?.title || (pendingUserMessage ? t('pages.chatSystem.newConversation') : '');
+  const getMainAreaStyle = () => 'main-conversation-area';
 
   return (
     <div className="chat-system-page">
@@ -635,9 +306,18 @@ const ChatSystem: React.FC = () => {
 
         {/* 主对话区域 */}
         <div className={getMainAreaStyle()} data-tour="chat-main-area">
-          {!displayConversation && !pendingUserMessage ? (
+          {streamingState.isStreaming && <Button onClick={() => {
+            submissionRef.current = null;
+            startingRef.current = false;
+            setStarting(false);
+            closeConnection();
+          }}>{t('pages.chatSystem.stopGeneration')}</Button>}
+          {activeConversationId && !displayConversation && !pendingUserMessage ? (
+            <div role="status" style={{ padding: 32 }}><Spin spinning={currentConversationLoading} />{currentConversationLoading ? t('common.loading') : t('pages.chatSystem.errors.noConversationSelected')}</div>
+          ) : !displayConversation && !pendingUserMessage ? (
             /* 无对话且无待发送消息时显示模式选择器 */
             <ModeSelector
+              disabled={starting || streamingState.isStreaming || routeAdoptionPending}
               onModeSelect={handleModeSelect}
               onStartConversation={handleStartConversation}
             />
@@ -741,26 +421,13 @@ const ChatSystem: React.FC = () => {
                     const isCurrentConversationCompacting = activeConversationId ? compactingConversations.has(activeConversationId) : false;
                     return (
                       <Dropdown
-                        overlay={
-                          <Menu onClick={({ key }) => handleCompactTypeSelect(key as 'brutal' | 'precise')}>
-                            <Menu.Item key="precise">
-                              <div>
-                                <div>{t('pages.chatSystem.compact.preciseCompact')}</div>
-                                <div style={{ fontSize: '12px', color: 'rgba(45, 45, 45, 0.65)' }}>
-                                  {t('pages.chatSystem.compact.preciseCompactDesc')}
-                                </div>
-                              </div>
-                            </Menu.Item>
-                            <Menu.Item key="brutal">
-                              <div>
-                                <div>{t('pages.chatSystem.compact.brutalCompact')}</div>
-                                <div style={{ fontSize: '12px', color: 'rgba(45, 45, 45, 0.65)' }}>
-                                  {t('pages.chatSystem.compact.brutalCompactDesc')}
-                                </div>
-                              </div>
-                            </Menu.Item>
-                          </Menu>
-                        }
+                        menu={{
+                          onClick: ({ key }) => { if (key === 'brutal' || key === 'precise') handleCompactTypeSelect(key); },
+                          items: [
+                            { key: 'precise', label: <div><div>{t('pages.chatSystem.compact.preciseCompact')}</div><div style={{ fontSize: 12, color: 'rgba(45, 45, 45, 0.65)' }}>{t('pages.chatSystem.compact.preciseCompactDesc')}</div></div> },
+                            { key: 'brutal', label: <div><div>{t('pages.chatSystem.compact.brutalCompact')}</div><div style={{ fontSize: 12, color: 'rgba(45, 45, 45, 0.65)' }}>{t('pages.chatSystem.compact.brutalCompactDesc')}</div></div> }
+                          ]
+                        }}
                         trigger={['click']}
                         placement="bottomRight"
                         disabled={isCurrentConversationCompacting}
@@ -822,10 +489,11 @@ const ChatSystem: React.FC = () => {
 
               {/* 输入区域 */}
               <InputArea
+                conversationId={activeConversationId}
                 onSendMessage={handleSendMessage}
-                disabled={streamingState.isStreaming || (activeConversationId ? compactingConversations.has(activeConversationId) : false)}
+                disabled={starting || streamingState.isStreaming || routeAdoptionPending || (activeConversationId ? compactingConversations.has(activeConversationId) : false)}
                 mode={currentMode}
-                inheritedConfig={inheritedConfig}
+                inheritedConfig={initializedConfigRef.current === activeConversationId ? inheritedConfig : inheritedInput(displayConversation?.input_config)}
               />
             </>
           )}

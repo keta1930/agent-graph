@@ -1,5 +1,7 @@
+import type { JsonObject, JsonValue } from '../../types/json';
+import type { MCPTools, MCPToolTestResult } from '../../types/mcp';
 // src/components/mcp-manager/MCPToolsViewer.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Modal,
   Tabs,
@@ -29,8 +31,13 @@ interface MCPToolsViewerProps {
 }
 
 // 根据JSON Schema生成表单项
-const generateFormItem = (name: string, schema: any, t: (key: string, params?: any) => string) => {
-  const { type, description, format, minimum, maximum, items } = schema;
+const generateFormItem = (name: string, schema: JsonValue, t: ReturnType<typeof useT>) => {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return null;
+  const type = schema.type;
+  const description = typeof schema.description === 'string' ? schema.description : undefined;
+  const format = schema.format;
+  const minimum = typeof schema.minimum === 'number' ? schema.minimum : undefined;
+  const maximum = typeof schema.maximum === 'number' ? schema.maximum : undefined;
 
   switch (type) {
     case 'string':
@@ -132,31 +139,40 @@ const MCPToolsViewer: React.FC<MCPToolsViewerProps> = ({
   serverName,
 }) => {
   const t = useT();
-  const { tools, fetchTools, testTool } = useMCPStore();
+  const tools = useMCPStore(state => state.tools);
+  const fetchTools = useMCPStore(state => state.fetchTools);
+  const testTool = useMCPStore(state => state.testTool);
   const [loading, setLoading] = useState(false);
   const [testLoading, setTestLoading] = useState(false);
-  const [testResults, setTestResults] = useState<Record<string, any>>({});
-  const [forms] = useState(() => new Map());
+  const [testResults, setTestResults] = useState<Record<string, MCPToolTestResult>>({});
+  const [forms] = useState(() => new Map<string, React.ComponentRef<typeof Form<JsonObject>>>());
 
+  const request = useRef(0);
   useEffect(() => {
+    const owner = ++request.current;
+    setTestResults({});
+    setTestLoading(false);
     if (visible) {
       setLoading(true);
-      fetchTools().finally(() => setLoading(false));
+      void fetchTools().catch(() => {}).finally(() => { if (owner === request.current) setLoading(false); });
     }
-  }, [visible, fetchTools]);
+    return () => { request.current += 1; };
+  }, [visible, serverName, fetchTools]);
 
   const serverTools = tools[serverName] || [];
 
   const handleTest = async (toolName: string) => {
     const form = forms.get(toolName);
     if (!form) return;
+    const owner = request.current;
 
     try {
       setTestLoading(true);
       const values = await form.validateFields();
+      if (owner !== request.current) return;
       
       // 处理特殊类型的参数
-      const processedParams: Record<string, any> = {};
+      const processedParams: JsonObject = {};
       
       Object.entries(values).forEach(([key, value]) => {
         if (value === undefined || value === null || value === '') return;
@@ -180,6 +196,7 @@ const MCPToolsViewer: React.FC<MCPToolsViewerProps> = ({
 
       const result = await testTool(serverName, toolName, processedParams);
       
+      if (owner !== request.current) return;
       setTestResults(prev => ({
         ...prev,
         [toolName]: result
@@ -188,17 +205,18 @@ const MCPToolsViewer: React.FC<MCPToolsViewerProps> = ({
       if (result.status === 'success') {
         message.success(t('pages.mcpManager.toolsViewer.testToolSuccess', { name: toolName }));
       } else {
-        message.error(t('pages.mcpManager.toolsViewer.testToolFailed', { name: toolName, error: result.error }));
+        message.error(t('pages.mcpManager.toolsViewer.testToolFailed', { name: toolName, error: result.error ?? '' }));
       }
     } catch (error) {
+      if (owner !== request.current) return;
       message.error(t('pages.mcpManager.toolsViewer.testError', { error: error instanceof Error ? error.message : String(error) }));
     } finally {
-      setTestLoading(false);
+      if (owner === request.current) setTestLoading(false);
     }
   };
 
   // 渲染JSON对象
-  const renderJsonObject = (obj: any) => {
+  const renderJsonObject = (obj: JsonValue | undefined) => {
     if (!obj) return <span>null</span>;
     return (
       <pre className="bg-gray-100 p-4 rounded overflow-auto max-h-96">
@@ -208,21 +226,22 @@ const MCPToolsViewer: React.FC<MCPToolsViewerProps> = ({
   };
 
   // 为每个工具生成测试表单
-  const generateTestForm = (tool: any) => {
+  const generateTestForm = (tool: MCPTools[string][number]) => {
     const schema = tool.input_schema;
-    if (!schema || !schema.properties) {
+    if (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)) {
       return <Text type="secondary">{t('pages.mcpManager.toolsViewer.noParameters')}</Text>;
     }
 
-    const formItems = Object.entries(schema.properties).map(([name, propSchema]: [string, any]) => 
+    const formItems = Object.entries(schema.properties).map(([name, propSchema]) =>
       generateFormItem(name, propSchema, t)
     );
 
     return (
-      <Form
+      <Form<JsonObject>
         layout="vertical"
-        ref={(formRef: any) => {
+        ref={(formRef) => {
           if (formRef) forms.set(tool.name, formRef);
+          else forms.delete(tool.name);
         }}
       >
         {formItems}

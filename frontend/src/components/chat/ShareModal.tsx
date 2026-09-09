@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Modal, Input, Button, Space, Typography, App } from 'antd';
 import { Copy, Trash2, ExternalLink } from 'lucide-react';
+import { getErrorMessage } from '../../utils/errors';
 import { useT } from '../../i18n/hooks';
 
 const { Text } = Typography;
@@ -9,7 +10,7 @@ const { Text } = Typography;
 interface ShareModalProps {
   visible: boolean;
   shareUrl: string;
-  shareId: string; // eslint-disable-line @typescript-eslint/no-unused-vars
+  shareId: string;
   onClose: () => void;
   onDelete: () => Promise<void>;
 }
@@ -17,7 +18,6 @@ interface ShareModalProps {
 const ShareModal: React.FC<ShareModalProps> = ({
   visible,
   shareUrl,
-  shareId,
   onClose,
   onDelete
 }) => {
@@ -29,7 +29,7 @@ const ShareModal: React.FC<ShareModalProps> = ({
     try {
       await navigator.clipboard.writeText(shareUrl);
       message.success(t('pages.chatSystem.share.copySuccess'));
-    } catch (error) {
+    } catch {
       message.error(t('pages.chatSystem.share.copyFailed'));
     }
   };
@@ -53,8 +53,8 @@ const ShareModal: React.FC<ShareModalProps> = ({
           await onDelete();
           message.success(t('pages.chatSystem.share.deleteSuccess'));
           onClose();
-        } catch (error: any) {
-          message.error(t('pages.chatSystem.share.deleteFailed', { error: error.message }));
+        } catch (error) {
+          message.error(t('pages.chatSystem.share.deleteFailed', { error: getErrorMessage(error) }));
         } finally {
           setDeleting(false);
         }

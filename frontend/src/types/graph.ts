@@ -1,3 +1,4 @@
+import type { JsonValue } from './json';
 // src/types/graph.ts
 export interface NodePosition {
   x: number;
@@ -15,7 +16,7 @@ export interface AgentNode {
   system_tools?: string[];
   system_prompt: string;
   user_prompt: string;
-  max_iterations?: number;
+  max_iterations?: number | null;
   input_nodes: string[];
   output_nodes: string[];
   handoffs?: number;
@@ -36,8 +37,8 @@ export interface BackendGraphConfig {
 export interface GraphCardResponse {
   graph_name: string;
   description: string;
-  input_format: any;
-  output_format: any;
+  input_format: JsonValue;
+  output_format: JsonValue;
   api_endpoint: string;
   method: string;
 }
@@ -58,6 +59,7 @@ export interface GraphFilePath {
 }
 
 export interface ImportResult {
+  graph_name?: string;
   status: string;
   message: string;
   needs_api_key?: string[];
@@ -142,3 +144,5 @@ export interface GetVersionConfigResponse {
   config: BackendGraphConfig;
 }
 
+
+export interface GraphMutationResponse { status: string; message: string; }

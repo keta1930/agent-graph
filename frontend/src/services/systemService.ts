@@ -1,7 +1,7 @@
 // src/services/systemService.ts
 import api from './api';
 
-export const shutdownSystem = async (): Promise<any> => {
+export const shutdownSystem = async (): Promise<{ status: string; message: string }> => {
   try {
     const response = await api.post('/system/shutdown');
     return response.data;

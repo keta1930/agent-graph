@@ -44,54 +44,42 @@ const FileUploadButton: React.FC<FileUploadButtonProps> = ({
   const [selectedFiles, setSelectedFiles] = useState<FileItem[]>([]);
   const [showPanel, setShowPanel] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const filesRef = useRef<FileItem[]>([]);
+  const addedTriggerRef = useRef<number | undefined>(undefined);
 
   React.useEffect(() => {
     if (clearTrigger !== undefined) {
+      filesRef.current = [];
       setSelectedFiles([]);
       setShowPanel(false);
     }
   }, [clearTrigger]);
 
-  React.useEffect(() => {
-    if (addFilesTrigger && addFilesTrigger.files.length > 0) {
-      addFiles(addFilesTrigger.files);
-    }
-  }, [addFilesTrigger]);
-
-  const validateFile = (file: File): boolean => {
-    const fileSizeMB = file.size / 1024 / 1024;
-    if (fileSizeMB > maxSize) {
-      message.error(t('components.fileUploadButton.fileSizeExceeded', { name: file.name, max: maxSize }));
-      return false;
-    }
-
-    if (selectedFiles.length >= maxFiles) {
-      message.error(t('components.fileUploadButton.maxFilesError', { max: maxFiles }));
-      return false;
-    }
-
-    return true;
-  };
-
-  // 添加文件
-  const addFiles = (newFiles: File[]) => {
-    const validFiles: FileItem[] = [];
-
+  const addFiles = React.useCallback((newFiles: File[]) => {
+    if (disabled) return;
+    const updated = [...filesRef.current];
     for (const file of newFiles) {
-      if (validateFile(file)) {
-        validFiles.push({
-          file,
-          id: `${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
-        });
+      if (file.size / 1024 / 1024 > maxSize) {
+        message.error(t('components.fileUploadButton.fileSizeExceeded', { name: file.name, max: maxSize }));
+        continue;
       }
+      if (updated.length >= maxFiles) {
+        message.error(t('components.fileUploadButton.maxFilesError', { max: maxFiles }));
+        break;
+      }
+      updated.push({ file, id: Date.now() + '_' + Math.random().toString(36).slice(2) });
     }
+    if (updated.length === filesRef.current.length) return;
+    filesRef.current = updated;
+    setSelectedFiles(updated);
+    onFilesChange(updated.map(item => item.file));
+  }, [disabled, maxFiles, maxSize, onFilesChange, t]);
 
-    if (validFiles.length > 0) {
-      const updatedFiles = [...selectedFiles, ...validFiles].slice(0, maxFiles);
-      setSelectedFiles(updatedFiles);
-      onFilesChange(updatedFiles.map(item => item.file));
-    }
-  };
+  React.useEffect(() => {
+    if (!addFilesTrigger || addedTriggerRef.current === addFilesTrigger.timestamp) return;
+    addedTriggerRef.current = addFilesTrigger.timestamp;
+    addFiles(addFilesTrigger.files);
+  }, [addFilesTrigger, addFiles]);
 
   // 处理文件选择
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,7 +94,7 @@ const FileUploadButton: React.FC<FileUploadButtonProps> = ({
   };
 
   // 处理粘贴事件
-  const handlePaste = (e: ClipboardEvent) => {
+  const handlePaste = React.useCallback((e: ClipboardEvent) => {
     if (disabled) return;
 
     const items = e.clipboardData?.items;
@@ -137,11 +125,13 @@ const FileUploadButton: React.FC<FileUploadButtonProps> = ({
       addFiles(imageFiles);
       message.success(t('components.fileUploadButton.pasteSuccess', { count: imageFiles.length }));
     }
-  };
+  }, [addFiles, disabled, t]);
 
   // 删除文件
   const removeFile = (id: string) => {
-    const updatedFiles = selectedFiles.filter(item => item.id !== id);
+    if (disabled) return;
+    const updatedFiles = filesRef.current.filter(item => item.id !== id);
+    filesRef.current = updatedFiles;
     setSelectedFiles(updatedFiles);
     onFilesChange(updatedFiles.map(item => item.file));
   };
@@ -163,7 +153,7 @@ const FileUploadButton: React.FC<FileUploadButtonProps> = ({
       document.removeEventListener('paste', handlePaste);
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [disabled, selectedFiles, showPanel]);
+  }, [handlePaste, showPanel]);
 
   // 获取文件图标
   const getFileIcon = (file: File) => {
@@ -202,7 +192,7 @@ const FileUploadButton: React.FC<FileUploadButtonProps> = ({
           type="text"
           icon={<Upload size={14} strokeWidth={1.5} />}
           onClick={handleButtonClick}
-          disabled={disabled || selectedFiles.length >= maxFiles}
+          disabled={disabled}
           size={size}
           style={{
             color: selectedFiles.length > 0 ? '#b85845' : '#8b7355',
@@ -237,6 +227,7 @@ const FileUploadButton: React.FC<FileUploadButtonProps> = ({
       <input
         ref={fileInputRef}
         type="file"
+        disabled={disabled}
         multiple
         accept={accept}
         onChange={handleFileChange}

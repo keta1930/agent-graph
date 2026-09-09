@@ -2,14 +2,13 @@
 import React from 'react';
 import { Dropdown, App, message } from 'antd';
 import type { MenuProps } from 'antd';
-import { useNavigate } from 'react-router-dom';
 import { LogOut, Settings, Languages } from 'lucide-react';
 import { useT } from '../../i18n/hooks';
 import { useI18n } from '../../i18n';
 import { getCurrentUserDisplayName } from '../../config/user';
 import { logout as logoutAPI } from '../../services/authService';
-import { removeToken } from '../../utils/auth';
 import { setUserLanguage } from '../../services/userSettingsService';
+import { getSessionGeneration, isCurrentSession } from '../../utils/authSession';
 
 interface UserMenuProps {
   /** 是否收起状态（影响显示样式） */
@@ -30,7 +29,6 @@ const UserMenu: React.FC<UserMenuProps> = ({
   collapsed = false,
   placement = 'topLeft'
 }) => {
-  const navigate = useNavigate();
   const t = useT();
   const { locale, setLocale } = useI18n();
   const { modal } = App.useApp();
@@ -105,25 +103,15 @@ const UserMenu: React.FC<UserMenuProps> = ({
           color: 'rgba(45, 45, 45, 0.85)',
         }
       },
-      onOk: async () => {
-        try {
-          await logoutAPI();
-          removeToken();
-          message.success(t('pages.workspace.logoutSuccess'));
-          navigate('/login');
-        } catch (error) {
-          console.error('Logout failed:', error);
-          // 即使API调用失败，也清除本地token并跳转
-          removeToken();
-          navigate('/login');
-        }
-      }
+      onOk: logoutAPI
     });
   };
 
   const handleLanguageChange = async (language: 'en' | 'zh') => {
+    const generation = getSessionGeneration();
     try {
       await setUserLanguage(language);
+      if (!isCurrentSession(generation)) return;
       setLocale(language);
       message.success(
         language === 'zh'
@@ -131,7 +119,8 @@ const UserMenu: React.FC<UserMenuProps> = ({
           : 'Language switched to English'
       );
     } catch (error) {
-      console.error('Failed to set language:', error);
+      if (!isCurrentSession(generation)) return;
+      console.error('Failed to set language:', error instanceof Error ? error.message : 'Unknown error');
       message.error(
         language === 'zh'
           ? '语言设置失败'
@@ -228,12 +217,12 @@ const UserMenu: React.FC<UserMenuProps> = ({
               </div>
             </div>
           )}
-          {React.cloneElement(menu as React.ReactElement, {
+          {React.isValidElement<{ style?: React.CSSProperties }>(menu) ? React.cloneElement(menu, {
             style: {
               border: 'none',
               boxShadow: 'none',
             }
-          })}
+          }) : menu}
         </div>
       )}
     >

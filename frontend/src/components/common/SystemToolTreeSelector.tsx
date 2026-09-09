@@ -190,7 +190,7 @@ const SystemToolTreeSelector: React.FC<SystemToolTreeSelectorProps> = ({
       style={{ fontSize: '14px', ...style }}
       dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
       onChange={handleChange}
-      switcherIcon={(props: any) => {
+      switcherIcon={(props: { isLeaf?: boolean; expanded?: boolean }) => {
         if (props.isLeaf) return null;
         return (
           <span

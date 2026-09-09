@@ -1,17 +1,14 @@
 import api from './api'
+import { assertSession, clearSession, commitSession, type SessionCredentials } from './authSessionService'
+import { getSessionGeneration } from '../utils/authSession'
+import { getToken } from '../utils/auth'
 
 export interface LoginRequest {
   user_id: string
   password: string
 }
 
-export interface LoginResponse {
-  access_token: string
-  refresh_token: string  // 新增
-  token_type: string
-  user_id: string
-  role: string
-}
+export type LoginResponse = SessionCredentials
 
 export interface RegisterRequest {
   invite_code: string
@@ -21,10 +18,13 @@ export interface RegisterRequest {
 }
 
 export const login = async (userId: string, password: string): Promise<LoginResponse> => {
+  const generation = getSessionGeneration()
   const response = await api.post<LoginResponse>('/auth/login', {
     user_id: userId,
     password: password
   })
+  assertSession(generation)
+  commitSession(response.data)
   return response.data
 }
 
@@ -43,21 +43,16 @@ export const register = async (
 }
 
 export const logout = async (): Promise<void> => {
+  const token = getToken()
+  clearSession()
   try {
-    await api.post('/auth/logout')
-  } catch (error) {
-    console.error('Logout API call failed:', error)
+    await api.post('/auth/logout', undefined, { headers: token ? { Authorization: `Bearer ${token}` } : undefined })
+  } catch {
+    console.warn('Logout API call failed; local credentials have been cleared.')
   }
 }
 
 export const getCurrentUser = async () => {
   const response = await api.get('/auth/me')
-  return response.data
-}
-
-export const refreshToken = async (refreshToken: string): Promise<LoginResponse> => {
-  const response = await api.post<LoginResponse>('/auth/refresh', {
-    refresh_token: refreshToken
-  })
   return response.data
 }

@@ -26,7 +26,7 @@ const CreateGraphModal: React.FC<CreateGraphModalProps> = ({ visible, onOk, onCa
       await onOk(values);
       form.resetFields();
       onCancel();
-    } catch (error) {
+    } catch {
       // Form validation error or submission error
     }
   };

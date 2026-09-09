@@ -1,5 +1,5 @@
 // src/components/mcp-manager/MCPJsonEditor.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button, message, Alert, Card, Tooltip } from 'antd';
 import {
   Check,
@@ -9,7 +9,7 @@ import {
   Info,
   AlertTriangle
 } from 'lucide-react';
-import { MCPConfig } from '../../types/mcp';
+import { MCPConfig, MCPServerConfig } from '../../types/mcp';
 import Editor from "@monaco-editor/react";
 import { useT } from '../../i18n/hooks';
 
@@ -19,13 +19,25 @@ interface MCPJsonEditorProps {
   loading: boolean;
 }
 
-const cleanServerConfigForEditor = (config: any): any => {
-  const transportType = config.transportType || 'stdio';
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+
+const stringArray = (value: unknown): string[] => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) throw new Error('Expected a string array');
+  return value;
+};
+const cleanServerConfigForEditor = (config: unknown): MCPServerConfig => {
+  if (!isRecord(config)) throw new Error('Expected a server object');
+  const transportType = config.transportType ?? 'stdio';
+  if (transportType !== 'stdio' && transportType !== 'sse' && transportType !== 'streamable_http') throw new Error('Invalid transport type');
+  if (config.disabled !== undefined && typeof config.disabled !== 'boolean') throw new Error('Invalid disabled value');
+  if (config.timeout !== undefined && (typeof config.timeout !== 'number' || config.timeout <= 0)) throw new Error('Invalid timeout');
   
-  const cleanConfig: any = {
-    autoApprove: Array.isArray(config.autoApprove) ? config.autoApprove.filter((item: any) => item && typeof item === 'string') : [],
+  const cleanConfig: MCPServerConfig = {
+    autoApprove: stringArray(config.autoApprove),
+    args: [],
     disabled: Boolean(config.disabled),
-    timeout: Number(config.timeout) || 60,
+    timeout: typeof config.timeout === 'number' ? config.timeout : 60,
     transportType: transportType,
   };
 
@@ -34,7 +46,7 @@ const cleanServerConfigForEditor = (config: any): any => {
       cleanConfig.command = config.command;
     }
     if (Array.isArray(config.args) && config.args.length > 0) {
-      cleanConfig.args = config.args.filter((arg: any) => arg && typeof arg === 'string');
+      cleanConfig.args = stringArray(config.args);
     }
   } else if (transportType === 'sse' || transportType === 'streamable_http') {
     // 修复：为 sse 和 streamable_http 都保留 url 字段
@@ -57,19 +69,25 @@ const cleanServerConfigForEditor = (config: any): any => {
   }
 
   if (config.env && typeof config.env === 'object' && !Array.isArray(config.env) && Object.keys(config.env).length > 0) {
-    cleanConfig.env = config.env;
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(config.env)) {
+      if (typeof value !== 'string') throw new Error('Invalid environment value');
+      env[key] = value;
+    }
+    cleanConfig.env = env;
   }
 
   return cleanConfig;
 };
 
-const cleanFullConfigForEditor = (config: any): MCPConfig => {
-  const cleanedServers: Record<string, any> = {};
+const cleanFullConfigForEditor = (config: unknown): MCPConfig => {
+  if (!isRecord(config) || !isRecord(config.mcpServers)) throw new Error('Expected mcpServers object');
+  const cleanedServers: Record<string, MCPServerConfig> = {};
   
   if (config && config.mcpServers && typeof config.mcpServers === 'object') {
-    Object.keys(config.mcpServers).forEach(serverName => {
-      cleanedServers[serverName] = cleanServerConfigForEditor(config.mcpServers[serverName]);
-    });
+    for (const [serverName, server] of Object.entries(config.mcpServers)) {
+      cleanedServers[serverName] = cleanServerConfigForEditor(server);
+    }
   }
 
   return {
@@ -83,12 +101,16 @@ const MCPJsonEditor: React.FC<MCPJsonEditorProps> = ({
   loading
 }) => {
   const t = useT();
+  const edited = useRef(false);
   const [jsonText, setJsonText] = useState('');
+  const latestText = useRef(jsonText);
+  latestText.current = jsonText;
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (edited.current) return;
     try {
       const cleanedConfig = cleanFullConfigForEditor(config);
       const formatted = JSON.stringify(cleanedConfig, null, 2);
@@ -101,6 +123,7 @@ const MCPJsonEditor: React.FC<MCPJsonEditorProps> = ({
 
   const handleJsonTextChange = (value: string | undefined) => {
     const newValue = value || '';
+    edited.current = true;
     setJsonText(newValue);
     setCopied(false);
   };
@@ -148,13 +171,11 @@ const MCPJsonEditor: React.FC<MCPJsonEditorProps> = ({
       }
 
       const cleanedConfig = cleanFullConfigForEditor(configToSave);
-      await Promise.all([
-        onSave(cleanedConfig as MCPConfig),
-        new Promise(resolve => setTimeout(resolve, 800))
-      ]);
+      await onSave(cleanedConfig);
+      edited.current = latestText.current !== jsonText;
 
-    } catch (err: any) {
-      if (err.isVersionConflict) {
+    } catch (err) {
+      if (err instanceof Error && 'isVersionConflict' in err && err.isVersionConflict) {
         const errorMsg = t('pages.mcpManager.versionConflict', { message: err.message });
         message.error({
           content: errorMsg,
@@ -164,7 +185,6 @@ const MCPJsonEditor: React.FC<MCPJsonEditorProps> = ({
         const errorMsg = t('pages.mcpManager.configSaveFailed', { error: err instanceof Error ? err.message : String(err) });
         setError(errorMsg);
       }
-      await new Promise(resolve => setTimeout(resolve, 500));
     } finally {
       setSaving(false);
     }
@@ -234,7 +254,7 @@ const MCPJsonEditor: React.FC<MCPJsonEditorProps> = ({
           defaultLanguage="json"
           value={jsonText}
           onChange={handleJsonTextChange}
-          onMount={(editor, monaco) => {
+          onMount={(_editor, monaco) => {
             // Define custom theme
             monaco.editor.defineTheme('mcp-editor-theme', {
               base: 'vs',

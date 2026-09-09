@@ -14,8 +14,8 @@ import {
  * 获取所有记忆元数据
  * @returns 所有记忆的元数据列表
  */
-export const getMemories = async (): Promise<GetMemoriesMetadataResponse> => {
-  const response = await api.get('/memory');
+export const getMemories = async (options: { signal?: AbortSignal } = {}): Promise<GetMemoriesMetadataResponse> => {
+  const response = await api.get<GetMemoriesMetadataResponse>('/memory', options);
   return response.data;
 };
 
@@ -27,12 +27,13 @@ export const getMemories = async (): Promise<GetMemoriesMetadataResponse> => {
  */
 export const getOwnerMemories = async (
   ownerType: string,
-  ownerId: string
+  ownerId: string,
+  options: { signal?: AbortSignal } = {}
 ): Promise<GetMemoriesResponse> => {
-  const response = await api.post('/memory/detail', {
+  const response = await api.post<GetMemoriesResponse>('/memory/detail', {
     owner_type: ownerType,
     owner_id: ownerId
-  });
+  }, options);
   return response.data;
 };
 

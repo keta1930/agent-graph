@@ -1,3 +1,4 @@
+import type { JsonObject } from '../types/json';
 // src/services/exportService.ts
 import api from './api';
 
@@ -18,7 +19,7 @@ export interface ExportResponse {
   success: boolean;
   message: string;
   dataset_name?: string;
-  preview_data?: any[];
+  preview_data?: JsonObject[];
   total_records?: number;
   file_info?: FileInfo;
 }
@@ -27,8 +28,8 @@ export interface PreviewResponse {
   success: boolean;
   message?: string;
   dataset_name?: string;
-  dataset_info?: Record<string, any>;
-  preview_data?: any[];
+  dataset_info?: JsonObject;
+  preview_data?: JsonObject[];
   total_records?: number;
 }
 

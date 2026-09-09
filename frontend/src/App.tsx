@@ -1,40 +1,47 @@
 // src/App.tsx
-import React, { useEffect } from 'react';
+import React, { lazy, Suspense, useEffect, useSyncExternalStore } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider, App as AntApp } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhCN from 'antd/locale/zh_CN';
-import WorkspaceLayout from './layouts/WorkspaceLayout';
 import PrivateRoute from './components/common/PrivateRoute';
+import PageLoading from './components/common/PageLoading';
+import RouteErrorBoundary from './components/common/RouteErrorBoundary';
+import { getSessionGeneration, registerSessionReset } from './utils/authSession';
+import { subscribeToSessionStorage } from './services/authSessionService';
 import { isAuthenticated } from './utils/auth';
 import { I18nProvider, useI18n } from './i18n';
 
-// Import pages
-import Workspace from './pages/Workspace';
-import ChatSystem from './pages/ChatSystem';
-import GraphEditor from './pages/GraphEditor';
-import ModelManager from './pages/ModelManager';
-import MCPManager from './pages/MCPManager';
-import PromptManager from './pages/PromptManager';
-import AgentManager from './pages/AgentManager';
-import SystemToolsManager from './pages/SystemToolsManager';
-import ExportManager from './pages/ExportManager';
-import TaskManager from './pages/TaskManager';
-import TaskDetail from './pages/TaskDetail';
-import PreviewPage from './pages/PreviewPage';
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import AdminPanel from './pages/AdminPanel';
-import FileManager from './pages/FileManager';
-import MemoryManager from './pages/MemoryManager';
-import SharedConversation from './pages/SharedConversation';
-import Projects from './pages/Projects';
-import ProjectDetail from './pages/ProjectDetail';
+const WorkspaceLayout = lazy(() => import('./layouts/WorkspaceLayout'));
+const Workspace = lazy(() => import('./pages/Workspace'));
+const ChatSystem = lazy(() => import('./pages/ChatSystem'));
+const GraphEditor = lazy(() => import('./pages/GraphEditor'));
+const ModelManager = lazy(() => import('./pages/ModelManager'));
+const MCPManager = lazy(() => import('./pages/MCPManager'));
+const PromptManager = lazy(() => import('./pages/PromptManager'));
+const AgentManager = lazy(() => import('./pages/AgentManager'));
+const SystemToolsManager = lazy(() => import('./pages/SystemToolsManager'));
+const ExportManager = lazy(() => import('./pages/ExportManager'));
+const TaskManager = lazy(() => import('./pages/TaskManager'));
+const TaskDetail = lazy(() => import('./pages/TaskDetail'));
+const PreviewPage = lazy(() => import('./pages/PreviewPage'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const RegisterPage = lazy(() => import('./pages/RegisterPage'));
+const AdminPanel = lazy(() => import('./pages/AdminPanel'));
+const FileManager = lazy(() => import('./pages/FileManager'));
+const MemoryManager = lazy(() => import('./pages/MemoryManager'));
+const SharedConversation = lazy(() => import('./pages/SharedConversation'));
+const Projects = lazy(() => import('./pages/Projects'));
+const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
 
 // AppContent component that uses i18n context
 const AppContent: React.FC = () => {
   const { locale } = useI18n();
+  const sessionGeneration = useSyncExternalStore(registerSessionReset, getSessionGeneration);
   const antdLocale = locale === 'zh' ? zhCN : enUS;
+
+  // 公开分享页也保留身份监听，确保其间的账号变化使所有已加载 store 失效。
+  useEffect(subscribeToSessionStorage, []);
 
   useEffect(() => {
     // 设置页面标题
@@ -75,6 +82,8 @@ const AppContent: React.FC = () => {
     >
       <AntApp>
         <Router>
+          <RouteErrorBoundary key={sessionGeneration}>
+            <Suspense fallback={<PageLoading />}>
       <Routes>
         {/* 公开路由 - 登录和注册 */}
         <Route
@@ -255,6 +264,8 @@ const AppContent: React.FC = () => {
         {/* 默认重定向 */}
         <Route path="*" element={<Navigate to="/workspace" replace />} />
       </Routes>
+            </Suspense>
+          </RouteErrorBoundary>
         </Router>
       </AntApp>
     </ConfigProvider>

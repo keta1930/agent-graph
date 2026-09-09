@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { getErrorMessage } from '../../utils/errors';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Modal, Button, Space, Typography, message, Spin, App, Popconfirm } from 'antd';
 import {
   Save,
@@ -32,10 +33,10 @@ interface FileViewModalProps {
   onSave?: () => void;
   onDelete?: () => void;
   fileService?: {
-    getFile: (resourceId: string, filename: string) => Promise<FileDetailResponse>;
+    getFile: (resourceId: string, filename: string, options?: { signal?: AbortSignal }) => Promise<FileDetailResponse>;
     updateFile: (resourceId: string, filename: string, data: SaveFileRequest) => Promise<FileOperationResponse>;
     deleteFile: (resourceId: string, filename: string) => Promise<DeleteFileResponse>;
-    getFileVersion: (resourceId: string, filename: string, versionId: string) => Promise<FileVersionResponse>;
+    getFileVersion: (resourceId: string, filename: string, versionId: string, options?: { signal?: AbortSignal }) => Promise<FileVersionResponse>;
     downloadFile?: (resourceId: string, filename: string) => Promise<Blob>;
   };
   allowDownload?: boolean;
@@ -52,85 +53,110 @@ export const FileViewModal: React.FC<FileViewModalProps> = ({
   allowDownload = true,
 }) => {
   const t = useT();
+  const latestT = useRef(t);
+  latestT.current = t;
   const { modal } = App.useApp();
   const [fileDetail, setFileDetail] = useState<FileDetail | null>(null);
   const [content, setContent] = useState<string>('');
   const [originalContent, setOriginalContent] = useState<string>('');
-  const [isDirty, setIsDirty] = useState(false);
+  const isDirty = content !== originalContent;
+  const scope = useRef(0);
+  const pendingSave = useRef(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeView, setActiveView] = useState<'editor' | 'history'>('editor');
   const service = fileService || conversationFileService;
   const canDownload = allowDownload && typeof service.downloadFile === 'function';
 
-  useEffect(() => {
-    if (visible && filename) {
-      loadFile();
-    }
-  }, [visible, filename, resourceId]);
-
-  const loadFile = async () => {
-    if (!filename) return;
+  const loadFile = useCallback(async (signal?: AbortSignal) => {
+    if (!visible || !filename) return;
+    const owner = scope.current;
     setLoading(true);
     try {
-      const response = await service.getFile(resourceId, filename);
+      const response = await service.getFile(resourceId, filename, { signal });
+      if (owner !== scope.current || signal?.aborted) return;
       setFileDetail(response.file);
       setContent(response.file.content);
       setOriginalContent(response.file.content);
-      setIsDirty(false);
-    } catch (error: any) {
-      message.error(t('pages.fileManager.fileViewModal.loadFailed', { error: error.message }));
+    } catch (error) {
+      if (owner === scope.current && !signal?.aborted) message.error(latestT.current('pages.fileManager.fileViewModal.loadFailed', { error: getErrorMessage(error) }));
     } finally {
-      setLoading(false);
+      if (owner === scope.current && !signal?.aborted) setLoading(false);
     }
-  };
+  }, [visible, filename, resourceId, service]);
 
-  const handleContentChange = (value: string) => {
-    setContent(value);
-    setIsDirty(value !== originalContent);
-  };
+  useEffect(() => {
+    scope.current += 1;
+    const controller = new AbortController();
+    setContent('');
+    setOriginalContent('');
+    setFileDetail(null);
+    setActiveView('editor');
+    setSaving(false);
+    pendingSave.current = false;
+    void loadFile(controller.signal);
+    return () => { scope.current += 1; controller.abort(); };
+  }, [loadFile]);
+
+  const handleContentChange = (value: string) => setContent(value);
 
   const handleSave = async () => {
-    if (!filename) return;
+    if (!filename || pendingSave.current) return;
+    pendingSave.current = true;
+    const owner = scope.current;
+    const savedContent = content;
     setSaving(true);
     try {
       await service.updateFile(resourceId, filename, {
-        content,
+        content: savedContent,
         summary: fileDetail?.summary || '',
         log: t('pages.fileManager.fileViewModal.saveLog'),
       });
+      if (owner !== scope.current) return;
+      setOriginalContent(savedContent);
       message.success(t('pages.fileManager.fileViewModal.saveSuccess'));
-      setOriginalContent(content);
-      setIsDirty(false);
-      if (onSave) onSave();
-      await loadFile();
-    } catch (error: any) {
-      message.error(t('pages.fileManager.fileViewModal.saveFailed', { error: error.message }));
+      onSave?.();
+      // 刷新版本元数据时保留保存期间的新编辑。
+      try {
+        const response = await service.getFile(resourceId, filename);
+        if (owner === scope.current) setFileDetail(response.file);
+      } catch (error) {
+        if (owner === scope.current) message.error(t('pages.fileManager.fileViewModal.loadFailed', { error: getErrorMessage(error) }));
+      }
+    } catch (error) {
+      if (owner === scope.current) message.error(t('pages.fileManager.fileViewModal.saveFailed', { error: getErrorMessage(error) }));
     } finally {
-      setSaving(false);
+      if (owner === scope.current) { pendingSave.current = false; setSaving(false); }
     }
   };
 
   const handleDownload = async () => {
     if (!filename || !service.downloadFile) return;
+    const owner = scope.current;
     try {
       const blob = await service.downloadFile(resourceId, filename);
+      if (owner !== scope.current) return;
       downloadBlob(blob, filename.split('/').pop() || filename);
       message.success(t('pages.fileManager.downloadSuccess'));
-    } catch (error: any) {
-      message.error(t('pages.fileManager.downloadFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== scope.current) return;
+      message.error(t('pages.fileManager.downloadFailed', { error: getErrorMessage(error) }));
     }
   };
 
   const handleDeleteConfirm = async () => {
     if (!filename) return;
+    const owner = scope.current;
     try {
       await service.deleteFile(resourceId, filename);
+      if (owner !== scope.current) return;
       message.success(t('pages.fileManager.fileViewModal.deleteSuccess'));
       if (onDelete) onDelete();
-      handleClose();
-    } catch (error: any) {
-      message.error(t('pages.fileManager.fileViewModal.deleteFailed', { error: error.message }));
+      scope.current += 1;
+      onClose();
+    } catch (error) {
+      if (owner !== scope.current) return;
+      message.error(t('pages.fileManager.fileViewModal.deleteFailed', { error: getErrorMessage(error) }));
     }
   };
 
@@ -143,7 +169,7 @@ export const FileViewModal: React.FC<FileViewModalProps> = ({
         okType: 'danger',
         cancelText: t('pages.fileManager.fileViewModal.unsavedChangesCancel'),
         onOk: () => {
-          setIsDirty(false);
+          scope.current += 1;
           setContent('');
           setOriginalContent('');
           setFileDetail(null);
@@ -151,6 +177,7 @@ export const FileViewModal: React.FC<FileViewModalProps> = ({
         },
       });
     } else {
+      scope.current += 1;
       setContent('');
       setOriginalContent('');
       setFileDetail(null);

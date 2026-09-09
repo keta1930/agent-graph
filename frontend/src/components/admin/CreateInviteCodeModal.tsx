@@ -12,7 +12,7 @@ interface CreateInviteCodeModalProps {
   onMaxUsesChange: (value: number | null) => void;
   onConfirm: () => void;
   onCancel: () => void;
-  t: (key: string, params?: any) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
 }
 
 /**

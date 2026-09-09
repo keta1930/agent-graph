@@ -1,6 +1,9 @@
 // src/components/graph-editor/AddNodeModal.tsx
 import React, { useState } from 'react';
-import { Modal, Form, Input, Select, Radio, InputNumber, Button, Row, Col, Tag } from 'antd';
+import { Modal, Form, Input, Select, Radio, InputNumber, Button, Row, Col } from 'antd';
+import type { AgentNode } from '../../types/graph';
+import { validateNodeName } from '../../utils/graphEditorModel';
+import { useShallow } from 'zustand/react/shallow';
 import { Plus } from 'lucide-react';
 import { useModelStore } from '../../store/modelStore';
 import { useMCPStore } from '../../store/mcpStore';
@@ -18,16 +21,16 @@ const { TextArea } = Input;
 interface AddNodeModalProps {
   visible: boolean;
   onClose: () => void;
-  onAdd: (nodeData: any) => void;
+  onAdd: (nodeData: Partial<AgentNode>) => void;
 }
 
 const AddNodeModal: React.FC<AddNodeModalProps> = ({ visible, onClose, onAdd }) => {
   const t = useT();
-  const [form] = Form.useForm();
-  const { models } = useModelStore();
-  const { config } = useMCPStore();
-  const { graphs, currentGraph } = useGraphEditorStore();
-  const { agents, fetchAgents } = useAgentStore();
+  const [form] = Form.useForm<Omit<Partial<AgentNode>, 'output_enabled'> & { node_type?: string; output_enabled?: string }>();
+  const models = useModelStore(state => state.models);
+  const config = useMCPStore(state => state.config);
+  const { graphs, currentGraph } = useGraphEditorStore(useShallow(state => ({ graphs: state.graphs, currentGraph: state.currentGraph })));
+  const { agents, fetchAgents } = useAgentStore(useShallow(state => ({ agents: state.agents, fetchAgents: state.fetchAgents })));
   
   const [systemToolCategories, setSystemToolCategories] = useState<ToolCategory[]>([]);
   const [loadingTools, setLoadingTools] = useState(false);
@@ -47,7 +50,7 @@ const AddNodeModal: React.FC<AddNodeModalProps> = ({ visible, onClose, onAdd }) 
       loadPrompts();
       form.resetFields();
     }
-  }, [visible, fetchAgents]);
+  }, [visible, fetchAgents, form]);
 
   const loadSystemTools = async () => {
     setLoadingTools(true);
@@ -103,7 +106,7 @@ const AddNodeModal: React.FC<AddNodeModalProps> = ({ visible, onClose, onAdd }) 
         model_name: values.model_name || undefined,
         system_tools: values.system_tools || [],
         max_iterations: values.max_iterations || undefined,
-        handoffs: values.handoffs || null,
+        handoffs: values.handoffs ?? undefined,
         system_prompt: values.system_prompt || "",
         user_prompt: values.user_prompt || "",
         output_enabled: values.output_enabled === 'enabled',
@@ -112,7 +115,7 @@ const AddNodeModal: React.FC<AddNodeModalProps> = ({ visible, onClose, onAdd }) 
       onAdd(nodeData);
       form.resetFields();
       onClose();
-    } catch (error) {
+    } catch {
       // Form validation error
     }
   };
@@ -279,11 +282,9 @@ const AddNodeModal: React.FC<AddNodeModalProps> = ({ visible, onClose, onAdd }) 
             rules={[
               { required: true, message: t('components.graphEditor.addNodeModal.nodeNameRequired') },
               {
-                validator: (_, value) => {
-                  if (value && (/[/\\.]/.test(value))) {
-                    return Promise.reject(t('components.graphEditor.addNodeModal.nodeNameInvalid'));
-                  }
-                  return Promise.resolve();
+                validator: (_, value: string) => {
+                  try { validateNodeName(value ?? '', new Set(currentGraph?.nodes.map(node => node.name) ?? [])); return Promise.resolve(); }
+                  catch { return Promise.reject(t('components.graphEditor.addNodeModal.nodeNameConflict')); }
                 }
               }
             ]}
@@ -302,7 +303,7 @@ const AddNodeModal: React.FC<AddNodeModalProps> = ({ visible, onClose, onAdd }) 
             name="description"
             tooltip={{
               title: t('components.graphEditor.addNodeModal.nodeDescriptionTooltip'),
-              overlayStyle: { fontSize: '13px' }
+              styles: { root: { fontSize: '13px' } }
             }}
             style={{ marginBottom: '16px' }}
           >
@@ -381,7 +382,7 @@ const AddNodeModal: React.FC<AddNodeModalProps> = ({ visible, onClose, onAdd }) 
                         name="agent_name"
                         tooltip={{
                           title: t('components.graphEditor.addNodeModal.agentNameTooltip'),
-                          overlayStyle: { fontSize: '13px' }
+                          styles: { root: { fontSize: '13px' } }
                         }}
                         style={{ marginBottom: '0' }}
                       >
@@ -433,7 +434,7 @@ const AddNodeModal: React.FC<AddNodeModalProps> = ({ visible, onClose, onAdd }) 
             name="system_prompt"
             tooltip={{
               title: t('components.graphEditor.addNodeModal.systemPromptTooltip'),
-              overlayStyle: { fontSize: '13px' }
+              styles: { root: { fontSize: '13px' } }
             }}
             style={{ marginBottom: '8px' }}
           >
@@ -477,7 +478,7 @@ const AddNodeModal: React.FC<AddNodeModalProps> = ({ visible, onClose, onAdd }) 
             name="user_prompt"
             tooltip={{
               title: t('components.graphEditor.addNodeModal.userPromptTooltip'),
-              overlayStyle: { fontSize: '13px' }
+              styles: { root: { fontSize: '13px' } }
             }}
             style={{ marginBottom: '8px' }}
           >
@@ -523,7 +524,7 @@ const AddNodeModal: React.FC<AddNodeModalProps> = ({ visible, onClose, onAdd }) 
                 name="handoffs"
                 tooltip={{
                   title: t('components.graphEditor.addNodeModal.loopCountTooltip'),
-                  overlayStyle: { fontSize: '13px' }
+                  styles: { root: { fontSize: '13px' } }
                 }}
                 style={{ marginBottom: '0' }}
               >
@@ -540,7 +541,7 @@ const AddNodeModal: React.FC<AddNodeModalProps> = ({ visible, onClose, onAdd }) 
                 name="max_iterations"
                 tooltip={{
                   title: t('components.graphEditor.addNodeModal.maxToolCallsTooltip'),
-                  overlayStyle: { fontSize: '13px' }
+                  styles: { root: { fontSize: '13px' } }
                 }}
                 style={{ marginBottom: '0' }}
               >

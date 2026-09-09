@@ -1,8 +1,50 @@
-// 智能Markdown渲染器组件
-import React from 'react';
-import ReactMarkdown from 'react-markdown';
+import { createContext, memo, useContext, useMemo, type ComponentProps } from 'react';
+import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import GlassCodeBlock from './GlassCodeBlock';
+
+interface MarkdownContextValue {
+  content: string;
+  isStreaming: boolean;
+  conversationId?: string;
+}
+
+const MarkdownContext = createContext<MarkdownContextValue>({ content: '', isStreaming: false });
+const remarkPlugins = [remarkGfm];
+
+/** 从 Markdown 已识别的块范围判断围栏是否仍在接收内容。 */
+function isOpenFence(source: string, quoteDepth: number) {
+  const lines = source.trimEnd().split('\n');
+  const opening = /^ {0,3}(`{3,}|~{3,})/.exec(lines[0]);
+  if (!opening) return false;
+  const marker = opening[1];
+  const quotePrefix = new RegExp(`^(?:[ \\t]*>[ \\t]?){${quoteDepth}}`);
+  const lastLine = lines[lines.length - 1].replace(quotePrefix, '').trim();
+  return lines.length === 1 || lastLine.length < marker.length || !lastLine.split('').every(character => character === marker[0]);
+}
+
+/** 使用 pre 节点区分围栏和行内代码，保持代码块组件身份稳定。 */
+function MarkdownCodeBlock({ node, children }: ComponentProps<'pre'> & ExtraProps) {
+  const { content, isStreaming, conversationId } = useContext(MarkdownContext);
+  const codeNode = node?.children.find(child => child.type === 'element' && child.tagName === 'code');
+  if (codeNode?.type !== 'element') return <pre>{children}</pre>;
+  const classes = codeNode.properties.className;
+  const languageClass = Array.isArray(classes) ? classes.find(value => typeof value === 'string' && value.startsWith('language-')) : undefined;
+  const language = typeof languageClass === 'string' ? languageClass.slice('language-'.length) : undefined;
+  const code = codeNode.children.map(child => child.type === 'text' ? child.value : '').join('').replace(/\n$/, '');
+  const start = node?.position?.start.offset;
+  const end = node?.position?.end.offset;
+  const linePrefix = start === undefined ? '' : content.slice(content.lastIndexOf('\n', start - 1) + 1, start);
+  const quoteDepth = linePrefix.split('>').length - 1;
+  const receiving = isStreaming && start !== undefined && end !== undefined && end >= content.trimEnd().length && isOpenFence(content.slice(start, end), quoteDepth);
+  return <GlassCodeBlock language={language} isStreaming={receiving} conversationId={conversationId}>{code}</GlassCodeBlock>;
+}
+
+function InlineCode({ children, className }: ComponentProps<'code'>) {
+  return <code className={className} style={{ background: 'rgba(139, 115, 85, 0.08)', padding: '2px 6px', borderRadius: '3px', fontSize: '0.9em', fontFamily: "'SF Mono', monospace", color: '#b85845' }}>{children}</code>;
+}
+
+const components: Components = { pre: MarkdownCodeBlock, code: InlineCode };
 
 interface SmartMarkdownProps {
   content: string;
@@ -10,133 +52,15 @@ interface SmartMarkdownProps {
   conversationId?: string;
 }
 
-/**
- * 智能Markdown渲染器
- * 支持流式输出时的代码块实时渲染
- */
-const SmartMarkdown: React.FC<SmartMarkdownProps> = ({
-  content,
-  isStreaming = false,
-  conversationId
-}) => {
-  // 解析内容中的代码块状态
-  const parseCodeBlocks = (text: string) => {
-    const codeBlocks: { type: string; content: string; isComplete: boolean; startIndex: number; endIndex: number }[] = [];
-    const lines = text.split('\n');
-    let currentBlock: { type: string; content: string; startIndex: number } | null = null;
-    let currentLineIndex = 0;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const currentPos = currentLineIndex;
-      currentLineIndex += line.length + 1; // +1 for newline
-
-      if (line.startsWith('```')) {
-        if (currentBlock) {
-          // 结束当前代码块
-          codeBlocks.push({
-            type: currentBlock.type,
-            content: currentBlock.content,
-            isComplete: true,
-            startIndex: currentBlock.startIndex,
-            endIndex: currentPos + line.length
-          });
-          currentBlock = null;
-        } else {
-          // 开始新代码块
-          const type = line.slice(3).trim() || 'text';
-          currentBlock = {
-            type,
-            content: '',
-            startIndex: currentPos
-          };
-        }
-      } else if (currentBlock) {
-        // 添加到当前代码块
-        currentBlock.content += (currentBlock.content ? '\n' : '') + line;
-      }
-    }
-
-    // 如果有未完成的代码块（流式输出中）
-    if (currentBlock) {
-      codeBlocks.push({
-        type: currentBlock.type,
-        content: currentBlock.content,
-        isComplete: false,
-        startIndex: currentBlock.startIndex,
-        endIndex: text.length
-      });
-    }
-
-    return codeBlocks;
-  };
-
-  const parsed = parseCodeBlocks(content);
-  const tail = parsed.length > 0 ? parsed[parsed.length - 1] : null;
-  const hasIncompleteTail = isStreaming && tail && !tail.isComplete;
-
-  // 渲染代码块的通用组件配置
-  const codeComponent = ({ node, ...codeProps }: any) => {
-    const { children: codeChildren, className: codeClassName, ...restProps } = codeProps;
-    const match = /language-(\w+)/.exec(codeClassName || '');
-    const lang = match ? match[1] : '';
-    const inline = !match;
-    return !inline ? (
-      <GlassCodeBlock language={lang} isStreaming={false} conversationId={conversationId}>
-        {String(codeChildren).replace(/\n$/, '')}
-      </GlassCodeBlock>
-    ) : (
-      <code style={{
-        background: 'rgba(139, 115, 85, 0.08)',
-        padding: '2px 6px',
-        borderRadius: '3px',
-        fontSize: '0.9em',
-        fontFamily: "'SF Mono', monospace",
-        color: '#b85845'
-      }} {...restProps}>
-        {codeChildren}
-      </code>
-    );
-  };
-
-  if (hasIncompleteTail) {
-    const before = content.slice(0, tail.startIndex);
-    const language = tail.type || 'text';
-    const codeText = tail.content || '';
-
-    return (
-      <div style={{
-        fontFamily: "Cambria, Georgia, 'Times New Roman', serif, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', serif",
-        fontSize: 'inherit'
-      }}>
-        {before && (
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{ code: codeComponent }}
-          >
-            {before}
-          </ReactMarkdown>
-        )}
-        <GlassCodeBlock language={language} isStreaming={true} conversationId={conversationId}>
-          {codeText}
-        </GlassCodeBlock>
-      </div>
-    );
-  }
-
+const SmartMarkdown = memo(function SmartMarkdown({ content, isStreaming = false, conversationId }: SmartMarkdownProps) {
+  const value = useMemo(() => ({ content, isStreaming, conversationId }), [content, isStreaming, conversationId]);
   return (
-    <div style={{
-      fontFamily: "Cambria, Georgia, 'Times New Roman', serif, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', serif",
-      fontSize: 'inherit'
-    }}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{ code: codeComponent }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
+    <MarkdownContext.Provider value={value}>
+      <div style={{ fontFamily: "Cambria, Georgia, 'Times New Roman', serif, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', serif", fontSize: 'inherit' }}>
+        <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>{content}</ReactMarkdown>
+      </div>
+    </MarkdownContext.Provider>
   );
-};
+});
 
 export default SmartMarkdown;

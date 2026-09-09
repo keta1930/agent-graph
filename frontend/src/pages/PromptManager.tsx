@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { getErrorMessage } from '../utils/errors';
+import { isAxiosError } from 'axios';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Layout, Button, Input, Space, Typography, Tag, Empty, Spin, App } from 'antd';
 import { Plus, Search, Upload as UploadIcon, FileText } from 'lucide-react';
 import { promptService } from '../services/promptService';
@@ -6,7 +8,7 @@ import { PromptInfo, PromptDetail, PromptCreate, PromptUpdate } from '../types/p
 import PromptCategoryPanel from '../components/prompt/PromptCategoryPanel';
 import CreatePromptModal from '../components/prompt/CreatePromptModal';
 import EditPromptModal from '../components/prompt/EditPromptModal';
-import ImportPromptModal from '../components/prompt/ImportPromptModal';
+import ImportPromptModal, { type PromptImportValues } from '../components/prompt/ImportPromptModal';
 import { useT } from '../i18n/hooks';
 import {
   HEADER_STYLES,
@@ -36,9 +38,9 @@ const PromptManager: React.FC = () => {
 
   // 数据状态
   const [prompts, setPrompts] = useState<PromptInfo[]>([]);
-  const [filteredGroups, setFilteredGroups] = useState<PromptGroup[]>([]);
+
   const [editingPrompt, setEditingPrompt] = useState<PromptDetail | null>(null);
-  const [categories, setCategories] = useState<CategoryStats>({});
+  const request = useRef(0);
 
   // UI 状态
   const [loading, setLoading] = useState(false);
@@ -56,81 +58,51 @@ const PromptManager: React.FC = () => {
   const [isUpdating, setIsUpdating] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
-  useEffect(() => {
-    loadPrompts();
-  }, []);
-
-  useEffect(() => {
-    filterPrompts();
-  }, [prompts, searchText]);
-
   /**
    * 加载 Prompt 列表
    */
-  const loadPrompts = async () => {
+  const loadPrompts = useCallback(async () => {
+    const owner = ++request.current;
     setLoading(true);
     try {
       const response = await promptService.listPrompts();
+      if (owner !== request.current) return;
       if (response.success && response.data) {
         setPrompts(response.data.prompts);
-        calculateCategories(response.data.prompts);
-        const grouped = groupPromptsByCategory(response.data.prompts);
-        setFilteredGroups(grouped);
       } else {
         message.error(response.message || t('pages.promptManager.loadFailed'));
       }
     } catch (error) {
+      if (owner !== request.current) return;
       message.error(t('pages.promptManager.loadFailed'));
       console.error('Error loading prompts:', error);
     } finally {
-      setLoading(false);
+      if (owner === request.current) setLoading(false);
     }
-  };
+  }, [message, t]);
 
-  /**
-   * 计算分类统计
-   */
-  const calculateCategories = (promptList: PromptInfo[]) => {
+  useEffect(() => { void loadPrompts(); return () => { request.current += 1; }; }, [loadPrompts]);
+
+  const categories = useMemo(() => {
     const stats: CategoryStats = {};
-    promptList.forEach((prompt) => {
-      const category = prompt.category || t('pages.promptManager.uncategorized');
-      stats[category] = (stats[category] || 0) + 1;
-    });
-    setCategories(stats);
-  };
-
-  /**
-   * 按分类分组 Prompt
-   */
-  const groupPromptsByCategory = (promptList: PromptInfo[]): PromptGroup[] => {
-    const groupMap = new Map<string, PromptGroup>();
-
-    promptList.forEach((prompt) => {
-      const category = prompt.category || t('pages.promptManager.uncategorized');
-      if (!groupMap.has(category)) {
-        groupMap.set(category, { category, prompts: [] });
-      }
-      groupMap.get(category)!.prompts.push(prompt);
-    });
-
-    return Array.from(groupMap.values());
-  };
-
-  /**
-   * 过滤 Prompt
-   */
-  const filterPrompts = () => {
-    let filtered = prompts;
-
-    if (searchText) {
-      filtered = filtered.filter((prompt) =>
-        prompt.name.toLowerCase().includes(searchText.toLowerCase())
-      );
+    for (const prompt of prompts) {
+      const key = prompt.category || '';
+      stats[key] = (stats[key] || 0) + 1;
     }
-
-    const grouped = groupPromptsByCategory(filtered);
-    setFilteredGroups(grouped);
-  };
+    return stats;
+  }, [prompts]);
+  const filteredGroups = useMemo(() => {
+    const groups = new Map<string, PromptGroup>();
+    const keyword = searchText.trim().toLowerCase();
+    for (const prompt of prompts) {
+      if (!prompt.name.toLowerCase().includes(keyword)) continue;
+      const category = prompt.category || '';
+      const group = groups.get(category) ?? { category, prompts: [] };
+      group.prompts.push(prompt);
+      groups.set(category, group);
+    }
+    return [...groups.values()];
+  }, [prompts, searchText]);
 
   /**
    * 加载 Prompt 详情
@@ -185,20 +157,11 @@ const PromptManager: React.FC = () => {
         }
         console.error('Create prompt failed:', response);
       }
-    } catch (error: any) {
-      console.error('Error creating prompt:', error);
-      const data = error?.response?.data;
-      if (data?.error_code === 'PROMPT_ALREADY_EXISTS') {
-        message.error(t('pages.promptManager.createModal.nameExists', { name: values.name }));
-      } else {
-        let errorMsg = t('pages.promptManager.createModal.createFailed');
-        if (data) {
-          errorMsg = data.message || data.detail || data.error || errorMsg;
-        } else if (error?.message) {
-          errorMsg = error.message;
-        }
-        message.error(errorMsg);
-      }
+    } catch (error) {
+      const data = isAxiosError<{ error_code?: string }>(error) ? error.response?.data : undefined;
+      message.error(data?.error_code === 'PROMPT_ALREADY_EXISTS'
+        ? t('pages.promptManager.createModal.nameExists', { name: values.name })
+        : getErrorMessage(error, t('pages.promptManager.createModal.createFailed')));
     } finally {
       setIsCreating(false);
     }
@@ -224,16 +187,8 @@ const PromptManager: React.FC = () => {
         message.error(errorMsg);
         console.error('Update prompt failed:', response);
       }
-    } catch (error: any) {
-      console.error('Error updating prompt:', error);
-      let errorMsg = t('pages.promptManager.editModal.updateFailed');
-      if (error?.response?.data) {
-        const data = error.response.data;
-        errorMsg = data.message || data.detail || data.error || errorMsg;
-      } else if (error?.message) {
-        errorMsg = error.message;
-      }
-      message.error(errorMsg);
+    } catch (error) {
+      message.error(getErrorMessage(error, t('pages.promptManager.editModal.updateFailed')));
     } finally {
       setIsUpdating(false);
     }
@@ -265,9 +220,9 @@ const PromptManager: React.FC = () => {
   /**
    * 导入 Prompt
    */
-  const handleImportPrompt = async (values: any) => {
+  const handleImportPrompt = async (values: PromptImportValues) => {
     const { file, name, category } = values;
-    if (!file || file.length === 0) {
+    if (!file?.[0]?.originFileObj) {
       message.error(t('pages.promptManager.importModal.selectFileError'));
       return;
     }
@@ -276,7 +231,7 @@ const PromptManager: React.FC = () => {
     try {
       const response = await promptService.importPromptByFile(file[0].originFileObj, {
         name,
-        category,
+        category: category ?? '',
       });
       if (response.success) {
         message.success(t('pages.promptManager.importModal.importSuccess'));

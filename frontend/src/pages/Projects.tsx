@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { getErrorMessage } from '../utils/errors';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   Layout,
   Input,
@@ -114,21 +115,26 @@ const Projects: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
 
-  const loadProjects = async () => {
+  const request = useRef(0);
+  const loadProjects = useCallback(async () => {
+    const owner = ++request.current;
     setLoading(true);
     try {
       const response = await projectService.listProjects();
+      if (owner !== request.current) return;
       setProjects(response.projects || []);
-    } catch (error: any) {
-      message.error(t('pages.projects.loadFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== request.current) return;
+      message.error(t('pages.projects.loadFailed', { error: getErrorMessage(error) }));
     } finally {
-      setLoading(false);
+      if (owner === request.current) setLoading(false);
     }
-  };
+  }, [message, t]);
 
   useEffect(() => {
-    loadProjects();
-  }, []);
+    void loadProjects();
+    return () => { request.current += 1; };
+  }, [loadProjects]);
 
   const filteredProjects = useMemo(() => {
     const keyword = searchText.trim().toLowerCase();
@@ -168,9 +174,9 @@ const Projects: React.FC = () => {
       message.success(t('pages.projects.createSuccess', { name: values.name }));
       handleModalCancel();
       loadProjects();
-    } catch (error: any) {
-      if (error?.errorFields) return;
-      message.error(t('pages.projects.saveFailed', { error: error.message }));
+    } catch (error) {
+      if (error && typeof error === 'object' && 'errorFields' in error) return;
+      message.error(t('pages.projects.saveFailed', { error: getErrorMessage(error) }));
     }
   };
 
@@ -179,8 +185,8 @@ const Projects: React.FC = () => {
       await projectService.deleteProject(project.project_id);
       message.success(t('pages.projects.deleteSuccess', { name: project.name }));
       loadProjects();
-    } catch (error: any) {
-      message.error(t('pages.projects.deleteFailed', { error: error.message }));
+    } catch (error) {
+      message.error(t('pages.projects.deleteFailed', { error: getErrorMessage(error) }));
     }
   };
 

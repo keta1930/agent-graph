@@ -1,3 +1,4 @@
+import { useT } from '../../i18n/hooks';
 import React from 'react';
 import { Collapse, Row, Col, Tag, Typography } from 'antd';
 import { ChevronDown, Sparkles } from 'lucide-react';
@@ -25,6 +26,7 @@ interface AgentCategoryPanelProps {
  * 展示按分类分组的 Agent 列表
  */
 const AgentCategoryPanel: React.FC<AgentCategoryPanelProps> = ({ groups, onView, onEdit, onDelete }) => {
+  const t = useT();
   return (
     <Collapse
       defaultActiveKey={[]}
@@ -58,7 +60,7 @@ const AgentCategoryPanel: React.FC<AgentCategoryPanelProps> = ({ groups, onView,
                 letterSpacing: '0.5px',
                 flex: 1
               }}>
-                {group.category}
+                {group.category || t('pages.agentManager.uncategorized')}
               </Text>
               <Tag style={{
                 ...TAG_STYLES.secondary,

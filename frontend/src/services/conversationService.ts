@@ -1,5 +1,11 @@
 // src/services/conversationService.ts
 import api from './api';
+import { collectPages } from '../utils/pagination';
+import { getToken } from '../utils/auth';
+import { getSessionGeneration } from '../utils/authSession';
+import { assertSession, clearSession, refreshAccessToken } from './authSessionService';
+import { getErrorMessage } from '../utils/errors';
+import type { JsonObject } from '../types/json';
 import {
   ConversationListResponse,
   ConversationDetail,
@@ -8,22 +14,29 @@ import {
   CreateShareResponse,
   ShareStatusResponse,
   DeleteShareResponse,
-  SharedConversationResponse,
-  SharedFileInfo
+  SharedConversationResponse
 } from '../types/conversation';
 
 const CONVERSATION_API_BASE = '/conversations';
 
 export class ConversationService {
-  // 获取对话列表
-  static async getConversations(): Promise<ConversationListResponse> {
-    const response = await api.get(`${CONVERSATION_API_BASE}`);
+  // 单页保留服务端总数，完整列表供本地搜索、全选和缓存使用。
+  static async getConversationPage(limit = 200, skip = 0, options: { signal?: AbortSignal } = {}): Promise<ConversationListResponse> {
+    const response = await api.get<ConversationListResponse>(`${CONVERSATION_API_BASE}`, { params: { limit, skip }, ...options });
     return response.data;
   }
 
+  static async getConversations(options: { signal?: AbortSignal } = {}): Promise<ConversationListResponse> {
+    const result = await collectPages(async (limit, skip) => {
+      const page = await this.getConversationPage(limit, skip, options);
+      return { items: page.conversations, total_count: page.total_count };
+    }, { pageSize: 200, keyOf: conversation => conversation.conversation_id, signal: options.signal });
+    return { conversations: result.items, total_count: result.total_count };
+  }
+
   // 获取对话详情
-  static async getConversationDetail(conversationId: string): Promise<ConversationDetail> {
-    const response = await api.get(`${CONVERSATION_API_BASE}/${conversationId}`);
+  static async getConversationDetail(conversationId: string, options: { signal?: AbortSignal } = {}): Promise<ConversationDetail> {
+    const response = await api.get<ConversationDetail>(`${CONVERSATION_API_BASE}/${encodeURIComponent(conversationId)}`, options);
     return response.data;
   }
 
@@ -32,7 +45,7 @@ export class ConversationService {
     conversationId: string,
     status: 'active' | 'deleted' | 'favorite'
   ): Promise<void> {
-    await api.put(`${CONVERSATION_API_BASE}/${conversationId}/status`, {
+    await api.put(`${CONVERSATION_API_BASE}/${encodeURIComponent(conversationId)}/status`, {
       status
     });
   }
@@ -42,7 +55,7 @@ export class ConversationService {
     conversationId: string,
     title: string
   ): Promise<void> {
-    await api.put(`${CONVERSATION_API_BASE}/${conversationId}/title`, {
+    await api.put(`${CONVERSATION_API_BASE}/${encodeURIComponent(conversationId)}/title`, {
       title
     });
   }
@@ -52,7 +65,7 @@ export class ConversationService {
     conversationId: string,
     tags: string[]
   ): Promise<void> {
-    await api.put(`${CONVERSATION_API_BASE}/${conversationId}/tags`, {
+    await api.put(`${CONVERSATION_API_BASE}/${encodeURIComponent(conversationId)}/tags`, {
       tags
     });
   }
@@ -70,7 +83,7 @@ export class ConversationService {
       max_iterations?: number | null;
     }
   ): Promise<void> {
-    await api.put(`${CONVERSATION_API_BASE}/${conversationId}/input-config`, {
+    await api.put(`${CONVERSATION_API_BASE}/${encodeURIComponent(conversationId)}/input-config`, {
       input_config: inputConfig
     });
   }
@@ -79,7 +92,7 @@ export class ConversationService {
   static async deleteConversationPermanent(
     conversationId: string
   ): Promise<void> {
-    await api.delete(`${CONVERSATION_API_BASE}/${conversationId}/permanent`);
+    await api.delete(`${CONVERSATION_API_BASE}/${encodeURIComponent(conversationId)}/permanent`);
   }
 
   // 压缩对话
@@ -88,8 +101,8 @@ export class ConversationService {
     modelName: string,
     compactType: 'brutal' | 'precise' = 'precise',
     compactThreshold: number = 2000
-  ): Promise<any> {
-    const response = await api.post(`${CONVERSATION_API_BASE}/${conversationId}/compact`, {
+  ): Promise<{ status: string; message: string; conversation_id: string; compact_type: string; statistics?: JsonObject; error?: string }> {
+    const response = await api.post(`${CONVERSATION_API_BASE}/${encodeURIComponent(conversationId)}/compact`, {
       conversation_id: conversationId,
       model_name: modelName,
       compact_type: compactType,
@@ -100,52 +113,11 @@ export class ConversationService {
 
 
 
-  // Graph模式 - 创建SSE连接
-  static async createGraphSSE(request: GraphExecuteRequest): Promise<ReadableStreamDefaultReader<Uint8Array>> {
-    const token = localStorage.getItem('auth_token');
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-    };
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const response = await fetch(`${api.defaults.baseURL}/graphs/execute`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(request)
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    if (!response.body) {
-      throw new Error('Response body is null');
-    }
-
-    return response.body.getReader();
+  static async createGraphSSE(request: GraphExecuteRequest, options: { signal?: AbortSignal } = {}): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+    return openStream('/graphs/execute', JSON.stringify(request), options.signal, true);
   }
 
-
-
-  // Agent Invoke - 创建SSE连接（支持文件上传）
-  static async createAgentRunSSE(request: AgentRunRequest): Promise<ReadableStreamDefaultReader<Uint8Array>> {
-    const token = localStorage.getItem('auth_token');
-    const headers: Record<string, string> = {
-      'Accept': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-    };
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    try {
-      // 使用 FormData 代替 JSON（支持文件上传）
+  static async createAgentRunSSE(request: AgentRunRequest, options: { signal?: AbortSignal } = {}): Promise<ReadableStreamDefaultReader<Uint8Array>> {
       const formData = new FormData();
 
       // 必需参数
@@ -185,71 +157,43 @@ export class ConversationService {
         });
       }
 
-      const response = await fetch(`${api.defaults.baseURL}/agent/run`, {
-        method: 'POST',
-        headers,
-        body: formData
-      });
-
-      if (!response.ok) {
-        // 尝试解析错误响应
-        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-        try {
-          const errorData = await response.json();
-          if (errorData.detail) {
-            errorMessage = errorData.detail;
-          }
-        } catch {
-          // 如果无法解析JSON，使用默认错误消息
-        }
-        throw new Error(errorMessage);
-      }
-
-      if (!response.body) {
-        throw new Error('Response body is null');
-      }
-
-      return response.body.getReader();
-    } catch (error) {
-      console.error('创建 Agent SSE 连接失败:', error);
-      throw error;
-    }
+    return openStream('/agent/run', formData, options.signal);
   }
 
   // 分享相关API
   // 创建分享链接
   static async createShare(conversationId: string): Promise<CreateShareResponse> {
-    const response = await api.post(`${CONVERSATION_API_BASE}/${conversationId}/share`);
+    const response = await api.post(`${CONVERSATION_API_BASE}/${encodeURIComponent(conversationId)}/share`);
     return response.data;
   }
 
   // 查询分享状态
-  static async getShareStatus(conversationId: string): Promise<ShareStatusResponse> {
-    const response = await api.get(`${CONVERSATION_API_BASE}/${conversationId}/share/status`);
+  static async getShareStatus(conversationId: string, options: { signal?: AbortSignal } = {}): Promise<ShareStatusResponse> {
+    const response = await api.get<ShareStatusResponse>(`${CONVERSATION_API_BASE}/${encodeURIComponent(conversationId)}/share/status`, options);
     return response.data;
   }
 
   // 删除分享
   static async deleteShare(shareId: string): Promise<DeleteShareResponse> {
-    const response = await api.delete(`/share/${shareId}`);
+    const response = await api.delete(`/share/${encodeURIComponent(shareId)}`);
     return response.data;
   }
 
   // 获取分享的对话（无需认证）
-  static async getSharedConversation(shareId: string): Promise<SharedConversationResponse> {
-    const response = await api.get(`/share/${shareId}`);
+  static async getSharedConversation(shareId: string, options: { signal?: AbortSignal } = {}): Promise<SharedConversationResponse> {
+    const response = await api.get<SharedConversationResponse>(`/share/${encodeURIComponent(shareId)}`, options);
     return response.data;
   }
 
   // 获取分享的文件列表（无需认证）
-  static async getSharedFiles(shareId: string): Promise<string[]> {
-    const response = await api.get(`/share/${shareId}/files`);
+  static async getSharedFiles(shareId: string, options: { signal?: AbortSignal } = {}): Promise<string[]> {
+    const response = await api.get<{ files: string[] }>(`/share/${encodeURIComponent(shareId)}/files`, options);
     return response.data.files; // 后端返回 {success, files, total_count}
   }
 
   // 下载分享的单个文件（无需认证）
   static async downloadSharedFile(shareId: string, filename: string): Promise<Blob> {
-    const response = await api.get(`/share/${shareId}/file/${filename}`, {
+    const response = await api.get(`/share/${encodeURIComponent(shareId)}/file/${encodeURIComponent(filename)}`, {
       responseType: 'blob'
     });
     return response.data;
@@ -257,7 +201,7 @@ export class ConversationService {
 
   // 批量下载分享的所有文件（无需认证）
   static async downloadAllSharedFiles(shareId: string): Promise<Blob> {
-    const response = await api.get(`/share/${shareId}/batch`, {
+    const response = await api.get(`/share/${encodeURIComponent(shareId)}/batch`, {
       responseType: 'blob'
     });
     return response.data;
@@ -271,70 +215,84 @@ export function generateMongoId(): string {
   return (timestamp + randomHex).padEnd(24, '0').substring(0, 24);
 }
 
-// 本地存储工具
+async function openStream(path: string, body: BodyInit, signal?: AbortSignal, json = false): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+  const generation = getSessionGeneration();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    assertSession(generation, signal);
+    const token = getToken();
+    const headers: Record<string, string> = { Accept: 'text/event-stream', 'Cache-Control': 'no-cache' };
+    if (json) headers['Content-Type'] = 'application/json';
+    if (token) headers.Authorization = 'Bearer ' + token;
+    const response = await fetch('/api' + path, { method: 'POST', headers, body, signal });
+    try { assertSession(generation, signal); } catch (error) {
+      await response.body?.cancel().catch(() => undefined);
+      throw error;
+    }
+    if (response.status === 401 && attempt === 0) {
+      await response.body?.cancel().catch(() => undefined);
+      if (!getToken() || getToken() === token) await refreshAccessToken(generation, signal);
+      continue;
+    }
+    if (!response.ok) {
+      let payload: unknown;
+      try { payload = await response.json(); } catch { /* 非 JSON 错误响应保留 HTTP 状态。 */ }
+      assertSession(generation, signal);
+      if (response.status === 401) clearSession();
+      throw new Error(getErrorMessage(payload, 'HTTP ' + response.status + ': ' + response.statusText));
+    }
+    if (!response.body) throw new Error('Response body is null');
+    return response.body.getReader();
+  }
+  throw new Error('Stream authentication failed');
+}
+
+// 缓存只接受发起请求时捕获的用户；浏览器存储失败不影响网络结果。
 export class ConversationStorage {
-  private static readonly CONVERSATIONS_KEY = 'conversations_cache';
-  private static readonly CURRENT_CONVERSATION_KEY = 'current_conversation';
-  private static readonly CACHE_DURATION = 5 * 60 * 1000; // 5分钟
-
-  // 缓存对话列表
-  static cacheConversationList(data: ConversationListResponse): void {
-    const cacheData = {
-      timestamp: Date.now(),
-      data
-    };
-    localStorage.setItem(this.CONVERSATIONS_KEY, JSON.stringify(cacheData));
+  private static readonly CACHE_DURATION = 5 * 60 * 1000;
+  private static key(resource: string, userId: string): string { return resource + ':v2:' + encodeURIComponent(userId); }
+  static removeLegacyCaches(): void {
+    try { localStorage.removeItem('conversations_cache'); } catch { /* 缓存可选。 */ }
+    try { sessionStorage.removeItem('current_conversation'); } catch { /* 缓存可选。 */ }
   }
-
-  // 获取缓存的对话列表
-  static getCachedConversationList(): ConversationListResponse | null {
+  static cacheConversationList(data: ConversationListResponse, userId: string | null): void {
+    if (!userId) return;
+    try { localStorage.setItem(this.key('conversations_cache', userId), JSON.stringify({ timestamp: Date.now(), data })); } catch { /* 缓存可选。 */ }
+  }
+  static getCachedConversationList(userId: string | null): ConversationListResponse | null {
+    this.removeLegacyCaches();
+    if (!userId) return null;
     try {
-      const cached = localStorage.getItem(this.CONVERSATIONS_KEY);
-      if (!cached) return null;
-
-      const { timestamp, data } = JSON.parse(cached);
-      if (Date.now() - timestamp > this.CACHE_DURATION) {
-        localStorage.removeItem(this.CONVERSATIONS_KEY);
-        return null;
-      }
-
-      return data;
-    } catch {
-      return null;
-    }
+      const cached: unknown = JSON.parse(localStorage.getItem(this.key('conversations_cache', userId)) ?? 'null');
+      if (!cached || typeof cached !== 'object' || !('timestamp' in cached) || !('data' in cached)) return null;
+      if (typeof cached.timestamp !== 'number' || Date.now() - cached.timestamp > this.CACHE_DURATION) return null;
+      const data = cached.data;
+      if (!data || typeof data !== 'object' || !('conversations' in data) || !('total_count' in data)) return null;
+      if (!Array.isArray(data.conversations) || typeof data.total_count !== 'number') return null;
+      if (!data.conversations.every(value => value && typeof value === 'object' && typeof value.conversation_id === 'string' && value.user_id === userId)) return null;
+      return data as ConversationListResponse;
+    } catch { return null; }
   }
-
-  // 清除对话列表缓存
-  static clearConversationListCache(): void {
-    localStorage.removeItem(this.CONVERSATIONS_KEY);
+  static clearConversationListCache(userId: string | null): void {
+    if (!userId) return;
+    try { localStorage.removeItem(this.key('conversations_cache', userId)); } catch { /* 缓存可选。 */ }
   }
-
-  // 存储当前对话详情
-  static setCurrentConversation(conversation: ConversationDetail): void {
-    sessionStorage.setItem(this.CURRENT_CONVERSATION_KEY, JSON.stringify(conversation));
+  static setCurrentConversation(conversation: ConversationDetail, userId: string | null): void {
+    if (!userId) return;
+    try { sessionStorage.setItem(this.key('current_conversation', userId), JSON.stringify(conversation)); } catch { /* 缓存可选。 */ }
   }
-
-  // 获取当前对话详情
-  static getCurrentConversation(): ConversationDetail | null {
+  static getCurrentConversation(userId: string | null): ConversationDetail | null {
+    this.removeLegacyCaches();
+    if (!userId) return null;
     try {
-      const stored = sessionStorage.getItem(this.CURRENT_CONVERSATION_KEY);
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
+      const stored: unknown = JSON.parse(sessionStorage.getItem(this.key('current_conversation', userId)) ?? 'null');
+      if (!stored || typeof stored !== 'object' || !('conversation_id' in stored) || !('rounds' in stored) || !('type' in stored)) return null;
+      if (typeof stored.conversation_id !== 'string' || !Array.isArray(stored.rounds) || (stored.type !== 'agent' && stored.type !== 'graph')) return null;
+      return stored as ConversationDetail;
+    } catch { return null; }
   }
-
-  // 清除当前对话详情
-  static clearCurrentConversation(): void {
-    sessionStorage.removeItem(this.CURRENT_CONVERSATION_KEY);
-  }
-
-  // 更新当前对话的标题
-  static updateCurrentConversationTitle(title: string): void {
-    const current = this.getCurrentConversation();
-    if (current) {
-      current.title = title;
-      this.setCurrentConversation(current);
-    }
+  static clearCurrentConversation(userId: string | null): void {
+    if (!userId) return;
+    try { sessionStorage.removeItem(this.key('current_conversation', userId)); } catch { /* 缓存可选。 */ }
   }
 }
+ConversationStorage.removeLegacyCaches();

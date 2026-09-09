@@ -1,4 +1,5 @@
 import api from './api';
+import { captureSession, assertSession } from './authSessionService';
 import {
   FileListResponse,
   FileDetailResponse,
@@ -15,25 +16,26 @@ export interface PushFileFromConversationRequest {
 }
 
 export const projectFileService = {
-  async listFiles(projectId: string): Promise<FileListResponse> {
-    const response = await api.get(`/projects/${projectId}/files`);
+  async listFiles(projectId: string, options: { signal?: AbortSignal } = {}): Promise<FileListResponse> {
+    const response = await api.get(`/projects/${encodeURIComponent(projectId)}/files`, options);
     return response.data;
   },
 
-  async getFile(projectId: string, filename: string): Promise<FileDetailResponse> {
+  async getFile(projectId: string, filename: string, options: { signal?: AbortSignal } = {}): Promise<FileDetailResponse> {
     const encodedFilename = encodeURIComponent(filename);
-    const response = await api.get(`/projects/${projectId}/files/${encodedFilename}`);
+    const response = await api.get(`/projects/${encodeURIComponent(projectId)}/files/${encodedFilename}`, options);
     return response.data;
   },
 
   async getFileVersion(
     projectId: string,
     filename: string,
-    versionId: string
+    versionId: string,
+    options: { signal?: AbortSignal } = {}
   ): Promise<FileVersionResponse> {
     const encodedFilename = encodeURIComponent(filename);
     const response = await api.get(
-      `/projects/${projectId}/files/${encodedFilename}/versions/${versionId}`
+      `/projects/${encodeURIComponent(projectId)}/files/${encodedFilename}/versions/${encodeURIComponent(versionId)}`, options
     );
     return response.data;
   },
@@ -42,7 +44,7 @@ export const projectFileService = {
     projectId: string,
     data: CreateFileRequest
   ): Promise<FileOperationResponse> {
-    const response = await api.post(`/projects/${projectId}/files`, data);
+    const response = await api.post(`/projects/${encodeURIComponent(projectId)}/files`, data);
     return response.data;
   },
 
@@ -53,7 +55,7 @@ export const projectFileService = {
   ): Promise<FileOperationResponse> {
     const encodedFilename = encodeURIComponent(filename);
     const response = await api.put(
-      `/projects/${projectId}/files/${encodedFilename}`,
+      `/projects/${encodeURIComponent(projectId)}/files/${encodedFilename}`,
       data
     );
     return response.data;
@@ -61,7 +63,7 @@ export const projectFileService = {
 
   async deleteFile(projectId: string, filename: string): Promise<DeleteFileResponse> {
     const encodedFilename = encodeURIComponent(filename);
-    const response = await api.delete(`/projects/${projectId}/files/${encodedFilename}`);
+    const response = await api.delete(`/projects/${encodeURIComponent(projectId)}/files/${encodedFilename}`);
     return response.data;
   },
 
@@ -69,7 +71,7 @@ export const projectFileService = {
     projectId: string,
     payload: PushFileFromConversationRequest
   ): Promise<FileOperationResponse> {
-    const response = await api.post(`/projects/${projectId}/files/push-from-conversation`, payload);
+    const response = await api.post(`/projects/${encodeURIComponent(projectId)}/files/push-from-conversation`, payload);
     return response.data;
   },
 
@@ -78,7 +80,9 @@ export const projectFileService = {
     file: File,
     targetPath?: string
   ): Promise<FileOperationResponse> {
+    const { generation } = captureSession();
     const content = await file.text();
+    assertSession(generation);
     const filename = targetPath || file.name;
 
     return this.createFile(projectId, {

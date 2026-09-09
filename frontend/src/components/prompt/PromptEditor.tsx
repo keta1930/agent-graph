@@ -1,11 +1,10 @@
+import MarkdownCode from '../common/MarkdownCode';
 import React from 'react';
 import { Input } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import 'katex/dist/katex.min.css';
 
 const { TextArea } = Input;
@@ -30,24 +29,8 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
         components={{
-          code({ node, inline, className, children, ...props }: any) {
-            const match = /language-(\w+)/.exec(className || '');
-            return !inline && match ? (
-              <SyntaxHighlighter
-                style={vscDarkPlus}
-                language={match[1]}
-                PreTag="div"
-                {...props}
-              >
-                {String(children).replace(/\n$/, '')}
-              </SyntaxHighlighter>
-            ) : (
-              <code className={className} {...props}>
-                {children}
-              </code>
-            );
-          },
-          table({ children, ...props }: any) {
+          pre: MarkdownCode,
+          table({ children }) {
             return (
               <div style={{ overflowX: 'auto', marginBottom: '16px' }}>
                 <table
@@ -56,14 +39,13 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
                     width: '100%',
                     marginBottom: '16px',
                   }}
-                  {...props}
                 >
                   {children}
                 </table>
               </div>
             );
           },
-          th({ children, ...props }: any) {
+          th({ children }) {
             return (
               <th
                 style={{
@@ -72,20 +54,18 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
                   background: '#f5f5f5',
                   textAlign: 'left',
                 }}
-                {...props}
               >
                 {children}
               </th>
             );
           },
-          td({ children, ...props }: any) {
+          td({ children }) {
             return (
               <td
                 style={{
                   border: '1px solid #ddd',
                   padding: '8px',
                 }}
-                {...props}
               >
                 {children}
               </td>

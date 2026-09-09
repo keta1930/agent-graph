@@ -1,12 +1,9 @@
 // 单条消息项组件
 import React from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { ConversationMessage, TaskRoundData } from '../../../types/conversation';
 import { getCurrentUserDisplayName } from '../../../config/user';
 import ReasoningDisplay from './ReasoningDisplay';
 import SmartMarkdown from './SmartMarkdown';
-import GlassCodeBlock from './GlassCodeBlock';
 import ToolCallDisplay from './ToolCallDisplay';
 import NodeExecutionInfo from './NodeExecutionInfo';
 import StaticTaskBlock from './StaticTaskBlock';
@@ -42,7 +39,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
   taskRoundDataMap = {},
   nodeInfo,
   reasoningContent,
-  isGraphMode = false,
   isFirstMessageInRound = false,
   renderingMode,
   conversationId
@@ -52,7 +48,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const isTool = message.role === 'tool';
 
   // 优先使用消息自带的reasoning_content，其次使用流式传入的reasoningContent
-  const effectiveReasoningContent = (message as any).reasoning_content || reasoningContent;
+  const effectiveReasoningContent = message.reasoning_content || reasoningContent;
 
   // 基础过滤：不显示系统消息和工具结果消息
   if (isSystem || isTool) {
@@ -137,51 +133,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 fontFamily: "Cambria, Georgia, 'Times New Roman', serif, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', serif"
               }}>
                 <div>
-                  {showTyping ? (
-                    <div>
-                      {/* 流式消息使用 SmartMarkdown 渲染，支持代码块 */}
-                      <SmartMarkdown
-                        content={message.content}
-                        isStreaming={true}
-                        conversationId={conversationId}
-                      />
-                    </div>
-                  ) : (
-                    // 使用 ReactMarkdown 渲染，支持代码块
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        code({ node, ...codeProps }) {
-                          const { children: codeChildren, className: codeClassName, ...restProps } = codeProps;
-                          const match = /language-(\w+)/.exec(codeClassName || '');
-                          const language = match ? match[1] : '';
-                          const inline = !match;
-
-                          return !inline ? (
-                            <GlassCodeBlock
-                              language={language}
-                              conversationId={conversationId}
-                            >
-                              {String(codeChildren).replace(/\n$/, '')}
-                            </GlassCodeBlock>
-                          ) : (
-                            <code style={{
-                              background: 'rgba(139, 115, 85, 0.08)',
-                              padding: '2px 6px',
-                              borderRadius: '3px',
-                              fontSize: '0.9em',
-                              fontFamily: "'SF Mono', monospace",
-                              color: '#b85845'
-                            }} {...restProps}>
-                              {codeChildren}
-                            </code>
-                          );
-                        }
-                      }}
-                    >
-                      {message.content}
-                    </ReactMarkdown>
-                  )}
+                  <SmartMarkdown content={message.content} isStreaming={showTyping} conversationId={conversationId} />
                 </div>
               </div>
             )}
@@ -240,4 +192,4 @@ const MessageItem: React.FC<MessageItemProps> = ({
   );
 };
 
-export default MessageItem;
+export default React.memo(MessageItem);

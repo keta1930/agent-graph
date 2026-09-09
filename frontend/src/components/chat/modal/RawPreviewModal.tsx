@@ -5,7 +5,7 @@ import { Modal, Spin, Table } from 'antd';
 interface RawPreviewModalProps {
   visible: boolean;
   title?: string;
-  data?: any;
+  data?: unknown;
   loading?: boolean;
   onClose: () => void;
 }
@@ -15,12 +15,12 @@ const RawPreviewModal: React.FC<RawPreviewModalProps> = ({ visible, title, data,
   const [detailTitle, setDetailTitle] = useState<string>('');
   const [detailContent, setDetailContent] = useState<string>('');
 
-  const showDetail = (field: string, value: any, idx: number) => {
+  const showDetail = (field: string, value: unknown, idx: number) => {
     setDetailTitle(`${field} - 第${idx + 1}行`);
     try {
       const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-      setDetailContent(text);
-    } catch (e) {
+      setDetailContent(text ?? '');
+    } catch {
       setDetailContent(String(value));
     }
     setDetailVisible(true);
@@ -28,7 +28,7 @@ const RawPreviewModal: React.FC<RawPreviewModalProps> = ({ visible, title, data,
 
   // 统一将数据转换为表格数据源与列配置（类似 pandas 预览）
   const { columns, dataSource } = useMemo(() => {
-    const arr: any[] = Array.isArray(data) ? data : (data ? [data] : []);
+    const arr: unknown[] = Array.isArray(data) ? data : (data ? [data] : []);
 
     // 构建列集合（并集）
     const keySet = new Set<string>();
@@ -41,13 +41,13 @@ const RawPreviewModal: React.FC<RawPreviewModalProps> = ({ visible, title, data,
     });
 
     // 格式化单元格值（对象/数组转为截断的 JSON 字符串，字符串长文本截断）
-    const formatValue = (val: any) => {
+    const formatValue = (val: unknown) => {
       if (val === null || val === undefined) return '';
       if (typeof val === 'object') {
         try {
           const text = JSON.stringify(val, null, 2);
           return text.length > 160 ? text.slice(0, 160) + '…' : text;
-        } catch (e) {
+        } catch {
           return String(val);
         }
       }
@@ -74,7 +74,7 @@ const RawPreviewModal: React.FC<RawPreviewModalProps> = ({ visible, title, data,
         title: k,
         dataIndex: k,
         width: widthMap[k],
-        render: (value: any, _record: any, idx: number) => {
+        render: (value: unknown, _record: Record<string, unknown>, idx: number) => {
           const clickable = k === 'messages' || k === 'tools';
           const content = formatValue(value);
           return (
@@ -119,7 +119,7 @@ const RawPreviewModal: React.FC<RawPreviewModalProps> = ({ visible, title, data,
           size="small"
           rowKey="__index"
           dataSource={dataSource}
-          columns={columns as any}
+          columns={columns}
           pagination={false}
           tableLayout="fixed"
           scroll={{ x: 'max-content' }}

@@ -1,117 +1,77 @@
-// src/components/common/GlobalNotification.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircleOutlined, InfoCircleOutlined, ExclamationCircleOutlined, CloseCircleOutlined, CloseOutlined } from '@ant-design/icons';
 import './GlobalNotification.css';
 
 export type NotificationType = 'success' | 'info' | 'warning' | 'error';
-
 export interface NotificationItem {
   id: string;
   type: NotificationType;
   title: string;
   message?: string;
-  duration?: number; // 自动关闭时间（毫秒），0表示不自动关闭
+  duration?: number;
   onClose?: () => void;
 }
-
 interface GlobalNotificationProps {
   notifications: NotificationItem[];
   onRemove: (id: string) => void;
 }
-
-const GlobalNotification: React.FC<GlobalNotificationProps> = ({ notifications, onRemove }) => {
-  const [visibleNotifications, setVisibleNotifications] = useState<Set<string>>(new Set());
-
-  // 处理通知的显示和自动关闭
-  useEffect(() => {
-    notifications.forEach(notification => {
-      // 新通知立即显示
-      if (!visibleNotifications.has(notification.id)) {
-        setVisibleNotifications(prev => new Set(prev).add(notification.id));
-        
-        // 设置自动关闭
-        if (notification.duration && notification.duration > 0) {
-          setTimeout(() => {
-            handleClose(notification.id);
-          }, notification.duration);
-        }
-      }
-    });
-  }, [notifications, visibleNotifications]);
-
-  const handleClose = (id: string) => {
-    // 先隐藏动画
-    setVisibleNotifications(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(id);
-      return newSet;
-    });
-    
-    // 延迟移除以允许动画完成
-    setTimeout(() => {
-      onRemove(id);
-    }, 300);
-  };
-
-  const getIcon = (type: NotificationType) => {
-    switch (type) {
-      case 'success':
-        return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
-      case 'info':
-        return <InfoCircleOutlined style={{ color: '#1890ff' }} />;
-      case 'warning':
-        return <ExclamationCircleOutlined style={{ color: '#faad14' }} />;
-      case 'error':
-        return <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
-      default:
-        return <InfoCircleOutlined style={{ color: '#1890ff' }} />;
-    }
-  };
-
-  const getTypeClass = (type: NotificationType) => {
-    return `notification-${type}`;
-  };
-
-  if (notifications.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="global-notifications-container">
-      {notifications.map(notification => (
-        <div
-          key={notification.id}
-          className={`
-            global-notification 
-            ${getTypeClass(notification.type)}
-            ${visibleNotifications.has(notification.id) ? 'visible' : 'hidden'}
-          `}
-        >
-          <div className="notification-content">
-            <div className="notification-icon">
-              {getIcon(notification.type)}
-            </div>
-            <div className="notification-text">
-              <div className="notification-title">
-                {notification.title}
-              </div>
-              {notification.message && (
-                <div className="notification-message">
-                  {notification.message}
-                </div>
-              )}
-            </div>
-            <div className="notification-close">
-              <CloseOutlined 
-                onClick={() => handleClose(notification.id)}
-                style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}
-              />
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+const icons = {
+  success: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
+  info: <InfoCircleOutlined style={{ color: '#1890ff' }} />,
+  warning: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+  error: <CloseCircleOutlined style={{ color: '#ff4d4f' }} />,
 };
+
+const Notification: React.FC<{ item: NotificationItem; onRemove: GlobalNotificationProps['onRemove'] }> = ({ item, onRemove }) => {
+  const [phase, setPhase] = useState<'entering' | 'visible' | 'exiting'>('entering');
+  const closing = useRef(false);
+  const removed = useRef(false);
+  const latest = useRef({ item, onRemove });
+  latest.current = { item, onRemove };
+  const close = useCallback(() => {
+    if (closing.current) return;
+    closing.current = true;
+    setPhase('exiting');
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setPhase(current => current === 'entering' ? 'visible' : current), 0);
+    return () => clearTimeout(timer);
+  }, []);
+  useEffect(() => {
+    if (!item.duration || item.duration <= 0 || phase === 'exiting') return;
+    const timer = setTimeout(close, item.duration);
+    return () => clearTimeout(timer);
+  }, [item.duration, phase, close]);
+  useEffect(() => {
+    if (phase !== 'exiting') return;
+    const timer = setTimeout(() => {
+      if (removed.current) return;
+      removed.current = true;
+      latest.current.onRemove(latest.current.item.id);
+      latest.current.item.onClose?.();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [phase]);
+
+  return <div className={`global-notification notification-${item.type} ${phase === 'visible' ? 'visible' : 'hidden'}`}>
+    <div className="notification-content">
+      <div className="notification-icon">{icons[item.type]}</div>
+      <div className="notification-text">
+        <div className="notification-title">{item.title}</div>
+        {item.message && <div className="notification-message">{item.message}</div>}
+      </div>
+      <button type="button" aria-label="Close" className="notification-close" onClick={close} style={{ cursor: 'pointer', border: 0, background: 'none', color: 'var(--text-secondary)' }}>
+        <CloseOutlined />
+      </button>
+    </div>
+  </div>;
+};
+
+const GlobalNotification: React.FC<GlobalNotificationProps> = ({ notifications, onRemove }) => notifications.length ? (
+  <div className="global-notifications-container">
+    {notifications.map(item => <Notification key={item.id} item={item} onRemove={onRemove} />)}
+  </div>
+) : null;
 
 export default GlobalNotification;

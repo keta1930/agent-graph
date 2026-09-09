@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { getErrorMessage } from '../utils/errors';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import {
   Layout,
   Typography,
@@ -89,15 +90,22 @@ const BUTTON_STYLES = {
 
 const ProjectDetail: React.FC = () => {
   const t = useT();
+  const latestT = useRef(t);
+  latestT.current = t;
   const { locale } = useI18n();
   const dateLocale = locale === 'zh' ? zhCN : enUS;
   const { message } = App.useApp();
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const scope = useRef(0);
+  const fileRequest = useRef(0);
+  const projectFilesRequest = useRef(0);
+  const projectFilesController = useRef<AbortController | null>(null);
   const [project, setProject] = useState<ProjectDetailType | null>(null);
   const [loading, setLoading] = useState(true);
   const [projectFiles, setProjectFiles] = useState<string[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
+  const [fileUploadsPending, setFileUploadsPending] = useState(0);
   const [fileModalOpen, setFileModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [createFileOpen, setCreateFileOpen] = useState(false);
@@ -108,6 +116,7 @@ const ProjectDetail: React.FC = () => {
   const [pushFileForm] = Form.useForm();
   const [conversationFiles, setConversationFiles] = useState<string[]>([]);
   const [conversationFilesLoading, setConversationFilesLoading] = useState(false);
+  const [loadedConversationId, setLoadedConversationId] = useState<string | null>(null);
   const [addConversationOpen, setAddConversationOpen] = useState(false);
   const [conversationSearch, setConversationSearch] = useState('');
   const [allConversations, setAllConversations] = useState<ConversationSummary[]>([]);
@@ -122,51 +131,89 @@ const ProjectDetail: React.FC = () => {
   const [instructionModalOpen, setInstructionModalOpen] = useState(false);
   const [instructionForm] = Form.useForm();
 
-  const loadProject = async () => {
+  const loadProject = useCallback(async (signal?: AbortSignal) => {
+    const owner = scope.current;
     if (!projectId) return;
     setLoading(true);
     try {
-      const detail = await projectService.getProjectDetail(projectId, true);
+      const detail = await projectService.getProjectDetail(projectId, true, { signal });
+      if (owner !== scope.current) return;
       setProject(detail);
-      if (detail.files) {
-        setProjectFiles(detail.files);
-      }
-    } catch (error: any) {
-      message.error(t('pages.projectDetail.loadFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== scope.current) return;
+      message.error(latestT.current('pages.projectDetail.loadFailed', { error: getErrorMessage(error) }));
     } finally {
-      setLoading(false);
+      if (owner === scope.current) setLoading(false);
     }
-  };
+  }, [projectId, message]);
 
-  const loadProjectFiles = async () => {
+  const loadProjectFiles = useCallback(async () => {
     if (!projectId) return;
+    const owner = scope.current;
+    const request = ++projectFilesRequest.current;
+    projectFilesController.current?.abort();
+    const controller = new AbortController();
+    projectFilesController.current = controller;
     setFilesLoading(true);
     try {
-      const response = await projectFileService.listFiles(projectId);
-      setProjectFiles(response.files || []);
-    } catch (error: any) {
-      message.error(t('pages.projectDetail.filesLoadFailed', { error: error.message }));
+      const response = await projectFileService.listFiles(projectId, { signal: controller.signal });
+      if (owner !== scope.current || request !== projectFilesRequest.current) return;
+      setProjectFiles(response.files);
+    } catch (error) {
+      if (owner !== scope.current || request !== projectFilesRequest.current) return;
+      message.error(latestT.current('pages.projectDetail.filesLoadFailed', { error: getErrorMessage(error) }));
     } finally {
-      setFilesLoading(false);
+      if (owner === scope.current && request === projectFilesRequest.current) setFilesLoading(false);
     }
-  };
+  }, [projectId, message]);
 
   const loadAllConversations = async () => {
+    const owner = scope.current;
     setConversationsLoading(true);
     try {
       const response = await ConversationService.getConversations();
+      if (owner !== scope.current) return;
       setAllConversations(response.conversations || []);
-    } catch (error: any) {
-      message.error(t('pages.projectDetail.conversationsLoadFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== scope.current) return;
+      message.error(t('pages.projectDetail.conversationsLoadFailed', { error: getErrorMessage(error) }));
     } finally {
-      setConversationsLoading(false);
+      if (owner === scope.current) setConversationsLoading(false);
     }
   };
 
   useEffect(() => {
-    loadProject();
-    loadProjectFiles();
-  }, [projectId]);
+    scope.current += 1;
+    const controller = new AbortController();
+    setProject(null);
+    setProjectFiles([]);
+    setFilesLoading(false);
+    setFileUploadsPending(0);
+    setCreateFileLoading(false);
+    setPushFileLoading(false);
+    setConversationFilesLoading(false);
+    setConversationsLoading(false);
+    setLoadedConversationId(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setFileModalOpen(false);
+    setCreateFileOpen(false);
+    setPushFileOpen(false);
+    setInstructionModalOpen(false);
+    setIsEditingName(false);
+    setAddConversationOpen(false);
+    setAllConversations([]);
+    setConversationFiles([]);
+    void loadProject(controller.signal);
+    void loadProjectFiles();
+    return () => {
+      scope.current += 1;
+      fileRequest.current += 1;
+      projectFilesRequest.current += 1;
+      controller.abort();
+      projectFilesController.current?.abort();
+    };
+  }, [loadProject, loadProjectFiles]);
+  useEffect(() => { fileRequest.current += 1; }, [pushFileOpen]);
 
   // 开始编辑项目名称
   const startEditingName = () => {
@@ -178,17 +225,20 @@ const ProjectDetail: React.FC = () => {
 
   // 保存项目名称
   const saveProjectName = async () => {
+    const owner = scope.current;
     if (!project || !editingNameValue.trim()) return;
     try {
       await projectService.updateProject(project.project_id, {
         name: editingNameValue.trim(),
         instruction: project.instruction,
       });
+      if (owner !== scope.current) return;
       message.success(t('pages.projects.updateSuccess', { name: editingNameValue.trim() }));
       setIsEditingName(false);
       loadProject();
-    } catch (error: any) {
-      message.error(t('pages.projects.saveFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== scope.current) return;
+      message.error(t('pages.projects.saveFailed', { error: getErrorMessage(error) }));
     }
   };
 
@@ -208,51 +258,67 @@ const ProjectDetail: React.FC = () => {
 
   // 保存项目指令
   const saveInstruction = async () => {
+    const owner = scope.current;
     if (!project) return;
     try {
       const values = await instructionForm.validateFields();
+      if (owner !== scope.current) return;
       await projectService.updateProject(project.project_id, {
         name: project.name,
         instruction: values.instruction,
       });
+      if (owner !== scope.current) return;
       message.success(t('pages.projects.updateSuccess', { name: project.name }));
       setInstructionModalOpen(false);
       loadProject();
-    } catch (error: any) {
-      if (error?.errorFields) return;
-      message.error(t('pages.projects.saveFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== scope.current) return;
+      if (error && typeof error === 'object' && 'errorFields' in error) return;
+      message.error(t('pages.projects.saveFailed', { error: getErrorMessage(error) }));
     }
   };
 
   const openAddConversationModal = async () => {
+    const owner = scope.current;
     setAddConversationOpen(true);
     setConversationSearch('');
     if (allConversations.length === 0) {
       await loadAllConversations();
+      if (owner !== scope.current) return;
     }
   };
 
   const handleAddConversation = async (conversationId: string) => {
+    const owner = scope.current;
     if (!project) return;
     try {
       await projectService.moveConversationToProject(conversationId, project.project_id);
+      if (owner !== scope.current) return;
       message.success(t('pages.projectDetail.conversationAdded'));
       await loadProject();
+      if (owner !== scope.current) return;
       await loadAllConversations();
-    } catch (error: any) {
-      message.error(t('pages.projectDetail.conversationAddFailed', { error: error.message }));
+      if (owner !== scope.current) return;
+    } catch (error) {
+      if (owner !== scope.current) return;
+      message.error(t('pages.projectDetail.conversationAddFailed', { error: getErrorMessage(error) }));
     }
   };
 
   const handleRemoveConversation = async (conversationId: string) => {
+    const owner = scope.current;
     if (!project) return;
     try {
       await projectService.moveConversationToProject(conversationId, null);
+      if (owner !== scope.current) return;
       message.success(t('pages.projectDetail.conversationRemoved'));
       await loadProject();
+      if (owner !== scope.current) return;
       await loadAllConversations();
-    } catch (error: any) {
-      message.error(t('pages.projectDetail.conversationRemoveFailed', { error: error.message }));
+      if (owner !== scope.current) return;
+    } catch (error) {
+      if (owner !== scope.current) return;
+      message.error(t('pages.projectDetail.conversationRemoveFailed', { error: getErrorMessage(error) }));
     }
   };
 
@@ -262,9 +328,11 @@ const ProjectDetail: React.FC = () => {
   };
 
   const handleCreateFile = async () => {
+    const owner = scope.current;
     if (!projectId) return;
     try {
       const values = await createFileForm.validateFields();
+      if (owner !== scope.current) return;
       setCreateFileLoading(true);
       await projectFileService.createFile(projectId, {
         filename: values.filename,
@@ -272,14 +340,16 @@ const ProjectDetail: React.FC = () => {
         content: values.content || '',
         log: values.log || t('pages.projectDetail.fileCreateLog'),
       });
+      if (owner !== scope.current) return;
       message.success(t('pages.projectDetail.fileCreateSuccess'));
       setCreateFileOpen(false);
       loadProjectFiles();
-    } catch (error: any) {
-      if (error?.errorFields) return;
-      message.error(t('pages.projectDetail.fileCreateFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== scope.current) return;
+      if (error && typeof error === 'object' && 'errorFields' in error) return;
+      message.error(t('pages.projectDetail.fileCreateFailed', { error: getErrorMessage(error) }));
     } finally {
-      setCreateFileLoading(false);
+      if (owner === scope.current) setCreateFileLoading(false);
     }
   };
 
@@ -288,20 +358,23 @@ const ProjectDetail: React.FC = () => {
   };
 
   const handleUploadFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const owner = scope.current;
     if (!projectId) return;
     const files = event.target.files ? Array.from(event.target.files) : [];
     if (files.length === 0) return;
-    setFilesLoading(true);
+    setFileUploadsPending(count => count + 1);
     try {
       await Promise.all(files.map((file) => projectFileService.uploadFile(projectId, file)));
+      if (owner !== scope.current) return;
       message.success(t('pages.projectDetail.fileUploadSuccess', { count: files.length }));
       loadProjectFiles();
-    } catch (error: any) {
-      message.error(t('pages.projectDetail.fileUploadFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== scope.current) return;
+      message.error(t('pages.projectDetail.fileUploadFailed', { error: getErrorMessage(error) }));
     } finally {
-      setFilesLoading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      if (owner === scope.current) {
+        setFileUploadsPending(count => count - 1);
+        if (fileInputRef.current) fileInputRef.current.value = '';
       }
     }
   };
@@ -312,55 +385,77 @@ const ProjectDetail: React.FC = () => {
   };
 
   const handleDeleteFile = async (filename: string) => {
+    const owner = scope.current;
     if (!projectId) return;
     try {
       await projectFileService.deleteFile(projectId, filename);
+      if (owner !== scope.current) return;
       message.success(t('pages.projectDetail.fileDeleteSuccess'));
       loadProjectFiles();
-    } catch (error: any) {
-      message.error(t('pages.projectDetail.fileDeleteFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== scope.current) return;
+      message.error(t('pages.projectDetail.fileDeleteFailed', { error: getErrorMessage(error) }));
     }
   };
 
   const openPushFileModal = async () => {
+    const owner = scope.current;
     pushFileForm.resetFields();
     setConversationFiles([]);
+    setLoadedConversationId(null);
+    setConversationFilesLoading(false);
     setPushFileOpen(true);
     if (allConversations.length === 0) {
       await loadAllConversations();
+      if (owner !== scope.current) return;
     }
   };
 
   const handleConversationSelect = async (conversationId: string) => {
+    const fileOwner = ++fileRequest.current;
+    const owner = scope.current;
+    pushFileForm.setFieldsValue({ filename: undefined });
+    setConversationFiles([]);
+    setLoadedConversationId(null);
     setConversationFilesLoading(true);
     try {
       const response = await conversationFileService.listFiles(conversationId);
+      if (owner !== scope.current) return;
+      if (fileOwner !== fileRequest.current) return;
       setConversationFiles(response.files || []);
-      pushFileForm.setFieldsValue({ filename: undefined });
-    } catch (error: any) {
-      message.error(t('pages.projectDetail.fileLoadConversationFailed', { error: error.message }));
+      setLoadedConversationId(conversationId);
+    } catch (error) {
+      if (owner !== scope.current) return;
+      if (fileOwner !== fileRequest.current) return;
+      message.error(t('pages.projectDetail.fileLoadConversationFailed', { error: getErrorMessage(error) }));
     } finally {
-      setConversationFilesLoading(false);
+      if (owner === scope.current && fileOwner === fileRequest.current) setConversationFilesLoading(false);
     }
   };
 
   const handlePushFile = async () => {
-    if (!projectId) return;
+    const owner = scope.current;
+    const fileOwner = fileRequest.current;
+    if (!projectId || conversationFilesLoading || !loadedConversationId) return;
     try {
       const values = await pushFileForm.validateFields();
+      if (owner !== scope.current || fileOwner !== fileRequest.current) return;
+      if (values.conversationId !== loadedConversationId || !conversationFiles.includes(values.filename)) return;
       setPushFileLoading(true);
       await projectFileService.pushFileFromConversation(projectId, {
         conversation_id: values.conversationId,
         filename: values.filename,
       });
+      if (owner !== scope.current) return;
       message.success(t('pages.projectDetail.filePushSuccess'));
       setPushFileOpen(false);
       loadProjectFiles();
-    } catch (error: any) {
-      if (error?.errorFields) return;
-      message.error(t('pages.projectDetail.filePushFailed', { error: error.message }));
+    } catch (error) {
+      if (owner !== scope.current) return;
+      if (error && typeof error === 'object' && 'errorFields' in error) return;
+      message.error(t('pages.projectDetail.filePushFailed', { error: getErrorMessage(error) }));
     } finally {
-      setPushFileLoading(false);
+      if (owner === scope.current) setPushFileLoading(false);
     }
   };
 
@@ -632,7 +727,7 @@ const ProjectDetail: React.FC = () => {
                     </Space>
                   </div>
                   <div style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: 'rgba(139, 115, 85, 0.3) transparent' }}>
-                  {filesLoading ? (
+                  {filesLoading || fileUploadsPending > 0 ? (
                     <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0' }}>
                       <Spin />
                     </div>
@@ -791,6 +886,7 @@ const ProjectDetail: React.FC = () => {
         cancelText={t('common.cancel')}
         confirmLoading={pushFileLoading}
         okButtonProps={{
+          disabled: conversationFilesLoading || !loadedConversationId,
           style: BUTTON_STYLES.primary,
         }}
         centered

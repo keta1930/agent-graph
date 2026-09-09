@@ -1,3 +1,4 @@
+import type { JsonObject } from '../types/json';
 import api from './api';
 
 // 系统工具 Schema 接口
@@ -8,7 +9,7 @@ export interface SystemToolSchema {
     function: {
       name: string;
       description: string;
-      parameters: any;
+      parameters: JsonObject;
     };
   };
 }
@@ -34,20 +35,20 @@ export interface SystemToolDetailResponse {
     function: {
       name: string;
       description: string;
-      parameters: any;
+      parameters: JsonObject;
     };
   };
   error?: string;
 }
 
 // 列出所有系统工具
-export const listSystemTools = async (): Promise<SystemToolListResponse> => {
-  const response = await api.get('/system-tools/list');
+export const listSystemTools = async (options: { signal?: AbortSignal } = {}): Promise<SystemToolListResponse> => {
+  const response = await api.get<SystemToolListResponse>('/system-tools/list', options);
   return response.data;
 };
 
 // 获取系统工具详情
 export const getSystemToolDetail = async (toolName: string): Promise<SystemToolDetailResponse> => {
-  const response = await api.get(`/system-tools/${toolName}`);
+  const response = await api.get(`/system-tools/${encodeURIComponent(toolName)}`);
   return response.data;
 };

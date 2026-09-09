@@ -1,9 +1,9 @@
 import React from 'react';
+import { useGraphEditorStore } from '../../../store/graphEditorStore';
 import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
-  useReactFlow,
   EdgeProps,
 } from 'reactflow';
 
@@ -14,7 +14,8 @@ import {
  * 这种设计允许用户在可视化编辑时快速移除不需要的连接关系。
  */
 const ButtonEdge: React.FC<EdgeProps> = ({
-  id,
+  source,
+  target,
   sourceX,
   sourceY,
   targetX,
@@ -24,7 +25,7 @@ const ButtonEdge: React.FC<EdgeProps> = ({
   style = {},
   markerEnd,
 }) => {
-  const { setEdges } = useReactFlow();
+  const removeConnection = useGraphEditorStore(state => state.removeConnection);
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -34,11 +35,7 @@ const ButtonEdge: React.FC<EdgeProps> = ({
     targetPosition,
   });
 
-  const onEdgeClick = () => {
-    setEdges((edges) => {
-      return edges.filter((edge) => edge.id !== id);
-    });
-  };
+  const onEdgeClick = () => removeConnection(source, target);
 
   return (
     <>

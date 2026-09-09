@@ -26,7 +26,7 @@ export interface PromptList {
   total: number;
 }
 
-export interface PromptResponse<T = any> {
+export interface PromptResponse<T = { name?: string; deleted_count?: number; failed_count?: number; deleted?: string[]; failed?: string[] }> {
   success: boolean;
   message: string;
   error_code?: string;

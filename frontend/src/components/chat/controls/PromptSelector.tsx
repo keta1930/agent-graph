@@ -89,7 +89,7 @@ const PromptSelector: React.FC<PromptSelectorProps> = ({
   };
 
   return (
-    <div style={{ position: 'relative' }} ref={dropdownRef}>
+    <div className={className} style={{ position: 'relative' }} ref={dropdownRef}>
       <Tooltip title={t('components.promptSelector.selectPrompt')}>
         <Button
           type="text"

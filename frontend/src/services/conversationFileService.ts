@@ -1,4 +1,5 @@
 import api from './api';
+import { captureSession, assertSession } from './authSessionService';
 import {
   FileListResponse,
   FileDetailResponse,
@@ -18,17 +19,17 @@ export const conversationFileService = {
   /**
    * List all files in a conversation
    */
-  async listFiles(conversationId: string): Promise<FileListResponse> {
-    const response = await api.get(`/conversations/${conversationId}/files`);
+  async listFiles(conversationId: string, options: { signal?: AbortSignal } = {}): Promise<FileListResponse> {
+    const response = await api.get(`/conversations/${encodeURIComponent(conversationId)}/files`, options);
     return response.data;
   },
 
   /**
    * Get file details and content (latest version)
    */
-  async getFile(conversationId: string, filename: string): Promise<FileDetailResponse> {
+  async getFile(conversationId: string, filename: string, options: { signal?: AbortSignal } = {}): Promise<FileDetailResponse> {
     const encodedFilename = encodeURIComponent(filename);
-    const response = await api.get(`/conversations/${conversationId}/files/${encodedFilename}`);
+    const response = await api.get(`/conversations/${encodeURIComponent(conversationId)}/files/${encodedFilename}`, options);
     return response.data;
   },
 
@@ -38,11 +39,12 @@ export const conversationFileService = {
   async getFileVersion(
     conversationId: string,
     filename: string,
-    versionId: string
+    versionId: string,
+    options: { signal?: AbortSignal } = {}
   ): Promise<FileVersionResponse> {
     const encodedFilename = encodeURIComponent(filename);
     const response = await api.get(
-      `/conversations/${conversationId}/files/${encodedFilename}/versions/${versionId}`
+      `/conversations/${encodeURIComponent(conversationId)}/files/${encodedFilename}/versions/${encodeURIComponent(versionId)}`, options
     );
     return response.data;
   },
@@ -54,7 +56,7 @@ export const conversationFileService = {
     conversationId: string,
     data: CreateFileRequest
   ): Promise<FileOperationResponse> {
-    const response = await api.post(`/conversations/${conversationId}/files`, data);
+    const response = await api.post(`/conversations/${encodeURIComponent(conversationId)}/files`, data);
     return response.data;
   },
 
@@ -68,7 +70,7 @@ export const conversationFileService = {
   ): Promise<FileOperationResponse> {
     const encodedFilename = encodeURIComponent(filename);
     const response = await api.put(
-      `/conversations/${conversationId}/files/${encodedFilename}`,
+      `/conversations/${encodeURIComponent(conversationId)}/files/${encodedFilename}`,
       data
     );
     return response.data;
@@ -79,7 +81,7 @@ export const conversationFileService = {
    */
   async deleteFile(conversationId: string, filename: string): Promise<DeleteFileResponse> {
     const encodedFilename = encodeURIComponent(filename);
-    const response = await api.delete(`/conversations/${conversationId}/files/${encodedFilename}`);
+    const response = await api.delete(`/conversations/${encodeURIComponent(conversationId)}/files/${encodedFilename}`);
     return response.data;
   },
 
@@ -92,7 +94,7 @@ export const conversationFileService = {
   ): Promise<Blob> {
     const encodedFilename = encodeURIComponent(filename);
     const response = await api.get(
-      `/conversations/${conversationId}/files/${encodedFilename}/download`,
+      `/conversations/${encodeURIComponent(conversationId)}/files/${encodedFilename}/download`,
       { responseType: 'blob' }
     );
     return response.data;
@@ -103,7 +105,7 @@ export const conversationFileService = {
    */
   async downloadAllFiles(conversationId: string): Promise<Blob> {
     const response = await api.get(
-      `/conversations/${conversationId}/files/download-all`,
+      `/conversations/${encodeURIComponent(conversationId)}/files/download-all`,
       { responseType: 'blob' }
     );
     return response.data;
@@ -125,7 +127,9 @@ export const conversationFileService = {
     file: File,
     targetPath?: string
   ): Promise<FileOperationResponse> {
+    const { generation } = captureSession();
     const content = await file.text();
+    assertSession(generation);
     const filename = targetPath || file.name;
 
     return this.createFile(conversationId, {

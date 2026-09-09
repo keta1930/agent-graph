@@ -6,6 +6,8 @@ __pycache__/
 .Python
 build/
 dist/
+!agent_graph/dist/
+!agent_graph/dist/**
 wheels/
 *.egg-info/
 eggs/

@@ -341,6 +341,11 @@ class MongoDBClient:
         """获取用户的对话列表（支持 agent 和 graph 类型）"""
         return await self.conversation_repository.list_conversations(user_id, conversation_type, limit, skip, project_id)
 
+    async def count_conversations(self, user_id: str = "default_user", conversation_type: str = None,
+                                  project_id: Optional[str] = None) -> int:
+        """统计与列表相同筛选条件下的全部对话。"""
+        return await self.conversation_repository.count_conversations(user_id, conversation_type, project_id)
+
     async def update_conversation_status(self, conversation_id: str, status: str,
                                          user_id: str = "default_user") -> bool:
         """更新对话状态"""

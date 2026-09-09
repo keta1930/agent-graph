@@ -328,6 +328,24 @@ class ConversationRepository:
             logger.error(f"更新token使用量失败: {str(e)}")
             return False
 
+    @staticmethod
+    def _list_query(user_id: str, conversation_type: Optional[str], project_id: Optional[str]) -> Dict[str, Any]:
+        """让列表和总数使用同一筛选条件，包含所有状态。"""
+        query = {"user_id": user_id}
+        if conversation_type:
+            if conversation_type not in ["agent", "graph"]:
+                raise ValueError(f"无效的对话类型过滤: {conversation_type}")
+            query["type"] = conversation_type
+        if project_id is not None:
+            query["project_id"] = project_id
+        return query
+
+    async def count_conversations(self, user_id: str = "default_user", conversation_type: str = None,
+                                  project_id: Optional[str] = None) -> int:
+        """统计同一用户和筛选条件下的完整对话数量。"""
+        query = self._list_query(user_id, conversation_type, project_id)
+        return await self.conversations_collection.count_documents(query)
+
     async def list_conversations(self, user_id: str = "default_user", conversation_type: str = None,
                                  limit: int = 200, skip: int = 0, project_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -341,19 +359,8 @@ class ConversationRepository:
             project_id: Project ID筛选（可选，None表示不筛选）
         """
         try:
-            # 构建查询条件
-            query = {"user_id": user_id}
-            if conversation_type:
-                # 验证类型
-                if conversation_type not in ["agent", "graph"]:
-                    logger.warning(f"无效的对话类型过滤: {conversation_type}")
-                    return []
-                query["type"] = conversation_type
-
-            if project_id is not None:
-                query["project_id"] = project_id
-
-            cursor = self.conversations_collection.find(query).sort("updated_at", -1).skip(skip).limit(limit)
+            query = self._list_query(user_id, conversation_type, project_id)
+            cursor = self.conversations_collection.find(query).sort([("updated_at", -1), ("_id", -1)]).skip(skip).limit(limit)
 
             conversations = []
             async for conversation in cursor:
@@ -362,7 +369,7 @@ class ConversationRepository:
             return conversations
         except Exception as e:
             logger.error(f"获取对话列表失败: {str(e)}")
-            return []
+            raise
 
     async def update_conversation_status(self, conversation_id: str, status: str,
                                          user_id: str = "default_user") -> bool:

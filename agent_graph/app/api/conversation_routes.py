@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime
 from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Query
 from agent_graph.app.infrastructure.database.mongodb import mongodb_client
 from agent_graph.app.infrastructure.storage.object_storage.conversation_image_manager import conversation_image_manager
 from agent_graph.app.models.conversation_schema import (
@@ -19,16 +19,21 @@ router = APIRouter(tags=["conversations"])
 
 
 @router.get("/conversations", response_model=ConversationListResponse)
-async def get_conversations_list(current_user: CurrentUser = Depends(get_current_user)):
+async def get_conversations_list(
+    limit: int = Query(default=200, ge=1, le=200),
+    skip: int = Query(default=0, ge=0),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """获取对话列表（返回所有类型的对话）"""
     try:
         user_id = current_user.user_id
         conversations = await mongodb_client.list_conversations(
             user_id=user_id,
             conversation_type=None,
-            limit=200,
-            skip=0
+            limit=limit,
+            skip=skip
         )
+        total_count = await mongodb_client.count_conversations(user_id=user_id, conversation_type=None)
 
         # 转换为完整格式
         conversation_items = []
@@ -71,7 +76,7 @@ async def get_conversations_list(current_user: CurrentUser = Depends(get_current
 
         return ConversationListResponse(
             conversations=conversation_items,
-            total_count=len(conversation_items)
+            total_count=total_count
         )
 
     except Exception as e:

@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from typing import List, Optional
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse, FileResponse
 from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
 from agent_graph.app.services.agent.agent_stream_executor import AgentStreamExecutor
@@ -38,8 +38,8 @@ agent_stream_executor = AgentStreamExecutor()
 @router.get("/list", response_model=AgentListResponse)
 async def list_agents(
     category: str = None,
-    limit: int = 100,
-    skip: int = 0,
+    limit: int = Query(default=100, ge=1, le=200),
+    skip: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """列出 Agents（支持分页和分类过滤）"""
@@ -53,6 +53,7 @@ async def list_agents(
             limit=limit,
             skip=skip
         )
+        total_count = await mongodb_client.agent_repository.count_agents(user_id=user_id, category=category)
 
         # 转换为响应格式
         agent_items = []
@@ -84,7 +85,7 @@ async def list_agents(
 
         return AgentListResponse(
             agents=agent_items,
-            total_count=len(agent_items)
+            total_count=total_count
         )
 
     except Exception as e:

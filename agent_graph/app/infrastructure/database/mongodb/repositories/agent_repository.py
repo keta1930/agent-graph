@@ -186,14 +186,14 @@ class AgentRepository:
             if category:
                 query["agent_config.category"] = category
 
-            cursor = self.agents_collection.find(query).sort("updated_at", -1).skip(skip).limit(limit)
+            cursor = self.agents_collection.find(query).sort([("updated_at", -1), ("_id", -1)]).skip(skip).limit(limit)
             agents = await cursor.to_list(length=limit)
 
             return [self._convert_objectid_to_str(agent) for agent in agents]
 
         except Exception as e:
             logger.error(f"列出 Agents 失败: {str(e)}")
-            return []
+            raise
 
     async def list_categories(self, user_id: str) -> List[Dict[str, Any]]:
         """
@@ -328,7 +328,7 @@ class AgentRepository:
 
         except Exception as e:
             logger.error(f"统计 Agent 数量失败: {str(e)}")
-            return 0
+            raise
 
     def _convert_objectid_to_str(self, doc: Dict[str, Any]) -> Dict[str, Any]:
         """将 ObjectId 转换为字符串"""

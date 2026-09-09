@@ -3,6 +3,7 @@
 职责：管理会话文档在 MinIO 中的存储和版本历史
 支持多用户隔离
 """
+import asyncio
 import logging
 from typing import Optional, Dict, Any, List
 from io import BytesIO
@@ -31,6 +32,11 @@ class ConversationDocumentManager:
         return f"{self.STORAGE_PREFIX}/{user_id}/{conversation_id}/{filename}"
 
     async def create_file(self, user_id: str, conversation_id: str, filename: str,
+                         content: str) -> Optional[Dict[str, Any]]:
+        """创建文件并返回版本和字节大小。"""
+        return await asyncio.to_thread(self._create_file_sync, user_id, conversation_id, filename, content)
+
+    def _create_file_sync(self, user_id: str, conversation_id: str, filename: str,
                          content: str) -> Optional[Dict[str, Any]]:
         """
         创建文件（返回version_id和size）
@@ -71,6 +77,11 @@ class ConversationDocumentManager:
 
     async def update_file(self, user_id: str, conversation_id: str, filename: str,
                          content: str) -> Optional[Dict[str, Any]]:
+        """写入文件新版本。"""
+        return await asyncio.to_thread(self._update_file_sync, user_id, conversation_id, filename, content)
+
+    def _update_file_sync(self, user_id: str, conversation_id: str, filename: str,
+                         content: str) -> Optional[Dict[str, Any]]:
         """
         更新文件（创建新版本）
 
@@ -110,6 +121,11 @@ class ConversationDocumentManager:
 
     async def read_file(self, user_id: str, conversation_id: str, filename: str,
                        version_id: Optional[str] = None) -> Optional[str]:
+        """读取内容并在线程内释放存储响应。"""
+        return await asyncio.to_thread(self._read_file_sync, user_id, conversation_id, filename, version_id)
+
+    def _read_file_sync(self, user_id: str, conversation_id: str, filename: str,
+                       version_id: Optional[str] = None) -> Optional[str]:
         """
         读取文件内容（可指定版本）
 
@@ -137,9 +153,13 @@ class ConversationDocumentManager:
                     object_name=object_name
                 )
 
-            content = response.read().decode('utf-8')
-            response.close()
-            response.release_conn()
+            try:
+                content = response.read().decode('utf-8')
+            finally:
+                try:
+                    response.close()
+                finally:
+                    response.release_conn()
 
             logger.info(f"✓ 读取文件: {filename} (用户: {user_id}, 会话: {conversation_id})")
             return content
@@ -149,6 +169,10 @@ class ConversationDocumentManager:
             return None
 
     async def delete_file(self, user_id: str, conversation_id: str, filename: str) -> bool:
+        """删除文件全部版本。"""
+        return await asyncio.to_thread(self._delete_file_sync, user_id, conversation_id, filename)
+
+    def _delete_file_sync(self, user_id: str, conversation_id: str, filename: str) -> bool:
         """
         删除文件所有版本
 
@@ -193,6 +217,10 @@ class ConversationDocumentManager:
             return False
 
     async def list_versions(self, user_id: str, conversation_id: str, filename: str) -> List[Dict[str, Any]]:
+        """在线程内读取全部版本并排序。"""
+        return await asyncio.to_thread(self._list_versions_sync, user_id, conversation_id, filename)
+
+    def _list_versions_sync(self, user_id: str, conversation_id: str, filename: str) -> List[Dict[str, Any]]:
         """
         列出文件所有版本
 
@@ -232,6 +260,10 @@ class ConversationDocumentManager:
             return []
 
     async def delete_all_conversation_files(self, user_id: str, conversation_id: str) -> bool:
+        """删除会话全部文件及其版本。"""
+        return await asyncio.to_thread(self._delete_all_conversation_files_sync, user_id, conversation_id)
+
+    def _delete_all_conversation_files_sync(self, user_id: str, conversation_id: str) -> bool:
         """
         删除会话所有文件（删除会话时调用）
 

@@ -5,10 +5,12 @@
 """
 import logging
 import os
+from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import Response
 
 from agent_graph.app.auth.dependencies import get_current_user
+from agent_graph.app.api.archive_response import TemporaryArchiveResponse
 from agent_graph.app.models.auth_schema import CurrentUser
 from agent_graph.app.models.conversation_share_schema import (
     CreateShareResponse,
@@ -18,6 +20,7 @@ from agent_graph.app.models.conversation_share_schema import (
     DeleteShareResponse
 )
 from agent_graph.app.services.conversation.conversation_share_service import conversation_share_service
+from agent_graph.app.services.conversation.document_archive import remove_archive_directory
 
 logger = logging.getLogger(__name__)
 
@@ -154,32 +157,26 @@ async def download_all_shared_files(share_id: str, background_tasks: BackgroundT
         HTTPException: 404 - 分享链接不存在或没有可下载的文件
         HTTPException: 500 - 创建ZIP失败
     """
+    zip_path = None
+    response_ready = False
     try:
         zip_path = await conversation_share_service.download_shared_files_zip(share_id)
         
         # 提取ZIP文件名
         zip_filename = os.path.basename(zip_path)
         
-        # 添加后台任务清理临时文件
-        def cleanup_temp_file():
-            try:
-                if os.path.exists(zip_path):
-                    os.remove(zip_path)
-                    logger.info(f"已清理临时ZIP文件: {zip_path}")
-            except Exception as e:
-                logger.error(f"清理临时ZIP文件失败: {str(e)}")
-        
-        background_tasks.add_task(cleanup_temp_file)
-        
         # 返回ZIP文件
-        return FileResponse(
+        response = TemporaryArchiveResponse(
             path=zip_path,
             media_type="application/zip",
             filename=zip_filename,
             headers={
                 "Content-Disposition": f'attachment; filename="{zip_filename}"'
-            }
+            },
+            background=background_tasks,
         )
+        response_ready = True
+        return response
         
     except HTTPException:
         raise
@@ -189,6 +186,9 @@ async def download_all_shared_files(share_id: str, background_tasks: BackgroundT
             status_code=500,
             detail=f"批量下载分享文件失败: {str(e)}"
         )
+    finally:
+        if zip_path is not None and not response_ready:
+            await remove_archive_directory(os.path.dirname(zip_path))
 
 
 
@@ -219,13 +219,19 @@ async def download_shared_file(share_id: str, filename: str):
 
         # 提取文件名（去除路径）
         file_basename = os.path.basename(filename)
+        encoded_filename = quote(file_basename)
+        disposition = (
+            f"attachment; filename*=utf-8''{encoded_filename}"
+            if encoded_filename != file_basename
+            else f'attachment; filename="{file_basename}"'
+        )
 
         # 返回文件内容，设置Content-Disposition响应头
         return Response(
             content=file_content,
             media_type="application/octet-stream",
             headers={
-                "Content-Disposition": f'attachment; filename="{file_basename}"'
+                "Content-Disposition": disposition
             }
         )
 

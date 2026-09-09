@@ -3,15 +3,13 @@
 提供对话分享功能的业务逻辑，供API路由使用
 """
 import logging
-import os
-import tempfile
-import zipfile
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from fastapi import HTTPException
 
 from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
-from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
+from agent_graph.app.services.conversation.conversation_document_service import conversation_document_service
+from agent_graph.app.services.conversation.document_archive import create_document_archive
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +210,7 @@ class ConversationShareService:
                 raise HTTPException(status_code=404, detail="文件不存在")
             
             # 从MinIO获取文件内容
-            content = await conversation_document_manager.read_file(
+            content = await conversation_document_service.read_authorized_file_content(
                 user_id=user_id,
                 conversation_id=conversation_id,
                 filename=filename
@@ -268,41 +266,19 @@ class ConversationShareService:
                 logger.warning(f"对话没有文件可下载: {conversation_id}")
                 raise HTTPException(status_code=404, detail="没有可下载的文件")
             
-            # 创建临时ZIP文件
-            temp_dir = tempfile.gettempdir()
-            zip_filename = f"conversation_{conversation_id}_{int(datetime.now().timestamp())}.zip"
-            zip_path = os.path.join(temp_dir, zip_filename)
-            
-            # 创建ZIP文件并保持目录结构
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for file_info in files:
-                    filename = file_info["filename"]
-                    
-                    try:
-                        # 从MinIO获取文件内容
-                        content = await conversation_document_manager.read_file(
-                            user_id=user_id,
-                            conversation_id=conversation_id,
-                            filename=filename
-                        )
-                        
-                        if content is not None:
-                            # 将文件添加到ZIP，保持原始目录结构
-                            if isinstance(content, str):
-                                zipf.writestr(filename, content)
-                            else:
-                                zipf.writestr(filename, content)
-                            logger.debug(f"添加文件到ZIP: {filename}")
-                        else:
-                            logger.warning(f"跳过无法读取的文件: {filename}")
-                            
-                    except Exception as e:
-                        logger.warning(f"添加文件到ZIP失败: {filename}, 错误: {str(e)}")
-                        continue
-            
-            logger.info(f"成功创建ZIP文件: {zip_path}, 包含 {len(files)} 个文件")
-            
-            return zip_path
+            async def read_content(filename: str) -> str | None:
+                return await conversation_document_service.read_authorized_file_content(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    filename=filename,
+                )
+
+            return await create_document_archive(
+                [file["filename"] for file in files],
+                read_content,
+                f"conversation_{conversation_id}_{int(datetime.now().timestamp())}.zip",
+                skip_unreadable=True,
+            )
             
         except HTTPException:
             raise

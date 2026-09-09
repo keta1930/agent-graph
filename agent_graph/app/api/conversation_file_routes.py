@@ -4,14 +4,12 @@
 """
 import logging
 import os
-import tempfile
-import zipfile
-import shutil
 from fastapi import APIRouter, HTTPException, Depends, Path, Query, BackgroundTasks
-from fastapi.responses import Response, FileResponse
-from urllib.parse import unquote
+from fastapi.responses import Response
+from urllib.parse import quote
 
 from agent_graph.app.models.auth_schema import CurrentUser
+from agent_graph.app.api.archive_response import TemporaryArchiveResponse
 from agent_graph.app.auth.dependencies import get_current_user
 from agent_graph.app.models.conversation_file_schema import (
     FileListResponse,
@@ -24,6 +22,7 @@ from agent_graph.app.models.conversation_file_schema import (
     DownloadAllRequest
 )
 from agent_graph.app.services.conversation.conversation_document_service import conversation_document_service
+from agent_graph.app.services.conversation.document_archive import create_document_archive, remove_archive_directory
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +122,8 @@ async def download_all_files(
 
     将会话内所有文件打包为zip下载，保持目录结构
     """
+    zip_path = None
+    response_ready = False
     try:
         # 获取所有文件列表
         files_result = await conversation_document_service.get_all_files(
@@ -138,40 +139,34 @@ async def download_all_files(
         if not files:
             raise HTTPException(status_code=404, detail="该会话没有文件")
 
-        # 创建临时目录
-        temp_dir = tempfile.mkdtemp()
-        zip_path = os.path.join(temp_dir, f"conversation_{conversation_id}_files.zip")
+        async def read_content(filename: str) -> str | None:
+            return await conversation_document_service.read_authorized_file_content(
+                conversation_id=conversation_id,
+                filename=filename,
+                user_id=current_user.user_id,
+            )
 
-        # 创建zip文件
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for filename in files:
-                # 获取文件内容
-                file_result = await conversation_document_service.get_file(
-                    conversation_id=conversation_id,
-                    filename=filename,
-                    user_id=current_user.user_id
-                )
-                
-                if file_result["success"]:
-                    content = file_result["file"]["content"]
-                    # 将文件添加到zip，保持目录结构
-                    zipf.writestr(filename, content.encode('utf-8'))
+        zip_path = await create_document_archive(
+            files, read_content, f"conversation_{conversation_id}_files.zip"
+        )
 
-        # 在响应完成后清理临时目录
-        background_tasks.add_task(shutil.rmtree, temp_dir, ignore_errors=True)
-
-        return FileResponse(
+        response = TemporaryArchiveResponse(
             path=zip_path,
             filename=f"conversation_{conversation_id}_files.zip",
             media_type="application/zip",
             background=background_tasks
         )
+        response_ready = True
+        return response
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"批量下载失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"批量下载失败: {str(e)}")
+    finally:
+        if zip_path is not None and not response_ready:
+            await remove_archive_directory(os.path.dirname(zip_path))
 
 @router.get("/{filename:path}/download")
 async def download_file(
@@ -183,11 +178,8 @@ async def download_file(
     下载单个文件
     """
     try:
-        # URL解码文件名
-        filename = unquote(filename)
-
         # 获取文件内容
-        result = await conversation_document_service.get_file(
+        result = await conversation_document_service.get_file_content(
             conversation_id=conversation_id,
             filename=filename,
             user_id=current_user.user_id
@@ -196,15 +188,23 @@ async def download_file(
         if not result["success"]:
             raise HTTPException(status_code=404, detail=result.get("error", "文件不存在"))
 
-        content = result["file"]["content"]
+        content = result["content"]
         file_content = content.encode('utf-8')
+
+        # 路径参数已由 ASGI 解码；响应头以 RFC 5987 保留中文和保留字符。
+        encoded_filename = quote(filename)
+        disposition = (
+            f"attachment; filename*=utf-8''{encoded_filename}"
+            if encoded_filename != filename
+            else f'attachment; filename="{filename}"'
+        )
 
         # 返回文件下载响应
         return Response(
             content=file_content,
             media_type="text/plain",
             headers={
-                "Content-Disposition": f'attachment; filename="{filename}"'
+                "Content-Disposition": disposition
             }
         )
 
@@ -228,9 +228,6 @@ async def get_file_version(
     用于查看历史版本的内容
     """
     try:
-        # URL解码文件名
-        filename = unquote(filename)
-
         result = await conversation_document_service.get_file_version(
             conversation_id=conversation_id,
             filename=filename,
@@ -262,9 +259,6 @@ async def get_file(
     返回文件内容、摘要、版本列表等信息
     """
     try:
-        # URL解码文件名
-        filename = unquote(filename)
-
         result = await conversation_document_service.get_file(
             conversation_id=conversation_id,
             filename=filename,
@@ -296,9 +290,6 @@ async def save_file(
     用户在前端编辑器中修改后保存
     """
     try:
-        # URL解码文件名
-        filename = unquote(filename)
-
         result = await conversation_document_service.save_file(
             conversation_id=conversation_id,
             filename=filename,
@@ -333,9 +324,6 @@ async def delete_file(
     删除文件及其所有历史版本
     """
     try:
-        # URL解码文件名
-        filename = unquote(filename)
-
         result = await conversation_document_service.delete_file(
             conversation_id=conversation_id,
             filename=filename,

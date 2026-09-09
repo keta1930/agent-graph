@@ -3,15 +3,54 @@
 提供会话文件管理的业务逻辑，供API路由使用
 """
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal, TypedDict
 from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
 from agent_graph.app.infrastructure.storage.object_storage.conversation_document_manager import conversation_document_manager
 
 logger = logging.getLogger(__name__)
 
 
+class FileContentSuccess(TypedDict):
+    """文件下载内容。"""
+    success: Literal[True]
+    content: str
+
+
+class FileContentFailure(TypedDict):
+    """文件下载失败原因。"""
+    success: Literal[False]
+    error: str
+
+
 class ConversationDocumentService:
     """会话文档服务"""
+
+    async def read_authorized_file_content(
+        self, conversation_id: str, filename: str, user_id: str
+    ) -> Optional[str]:
+        """读取已校验会话归属和文件元数据的内容，不查询版本历史。"""
+        return await conversation_document_manager.read_file(
+            user_id=user_id, conversation_id=conversation_id, filename=filename
+        )
+
+    async def get_file_content(
+        self, conversation_id: str, filename: str, user_id: str
+    ) -> FileContentSuccess | FileContentFailure:
+        """校验会话归属和文件存在后，只读取下载需要的内容。"""
+        try:
+            conversation = await mongodb_client.conversation_repository.get_conversation(conversation_id)
+            if not conversation or conversation.get("user_id") != user_id:
+                return {"success": False, "error": "会话不存在或无权限访问"}
+            file_meta = await mongodb_client.conversation_repository.get_file_metadata(conversation_id, filename)
+            if not file_meta:
+                return {"success": False, "error": f"文件不存在：{filename}"}
+            content = await self.read_authorized_file_content(conversation_id, filename, user_id)
+            if content is None:
+                return {"success": False, "error": f"读取文件内容失败：{filename}"}
+            return {"success": True, "content": content}
+        except Exception as e:
+            logger.error("获取文件内容失败: %s", e)
+            return {"success": False, "error": f"获取文件内容失败: {e}"}
 
     async def get_all_files(self, conversation_id: str, user_id: str) -> Dict[str, Any]:
         """

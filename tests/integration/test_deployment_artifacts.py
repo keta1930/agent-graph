@@ -53,11 +53,11 @@ def test_compose_preserves_persistent_volume_names() -> None:
     )
     config = json.loads(result.stdout)
 
-    assert config["name"] == "agent_graph_services"
+    assert config["name"] == "agent-graph"
     assert {volume["name"] for volume in config["volumes"].values()} == {
-        "agent_graph_services_mongodb_data",
-        "agent_graph_services_mongodb_config",
-        "agent_graph_services_minio_data",
+        "agent-graph_mongodb_data",
+        "agent-graph_mongodb_config",
+        "agent-graph_minio_data",
     }
 
 
@@ -81,6 +81,8 @@ def test_sdist_keeps_only_root_metadata_and_package(tmp_path: Path) -> None:
     assert "agent_graph/main.py" in expected_package
     assert "agent_graph/dist/index.html" in expected_package
     assert any(name.startswith("agent_graph/dist/assets/") for name in expected_package)
+
+    (source / "aaa-package-alias").symlink_to(source / "agent_graph", target_is_directory=True)
 
     # Keep unrelated files present, including ignored directories, during the real build.
     for name in (

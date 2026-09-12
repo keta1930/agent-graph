@@ -71,10 +71,10 @@ artifacts = ["agent_graph/dist/**"]
 packages = ["agent_graph"]
 
 [tool.hatch.build.targets.sdist]
-include = [
-    "/agent_graph",
-    "/README.md",
-    "/LICENSE",
+only-include = [
+    "agent_graph",
+    "README.md",
+    "LICENSE",
 ]
 
 [dependency-groups]

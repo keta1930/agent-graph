@@ -747,6 +747,24 @@ async function expectBellmanMath(content: Locator) {
   return formulas;
 }
 
+async function expectChatScrollContained(page: Page) {
+  const messages = page.locator('.message-display');
+  await messages.evaluate(element => { element.scrollTop = 0; });
+  const dimensions = await page.evaluate(() => ({
+    viewport: innerHeight, document: document.documentElement.scrollHeight,
+  }));
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
+  const scroll = await messages.evaluate(element => {
+    element.scrollTop = element.scrollHeight;
+    return { top: element.scrollTop, height: element.clientHeight, content: element.scrollHeight };
+  });
+  expect(scroll.content).toBeGreaterThan(scroll.height);
+  expect(scroll.top).toBeGreaterThan(0);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  await expect(page.locator('[data-tour="chat-input-area"]')).toBeInViewport({ ratio: 1 });
+}
+
 test('math delimiters: exact Bellman output persists and renders in chat, share and Graph', async ({ page, browser }) => {
   const sourceSha256 = 'eb4be2240800d1ce249d34316cb70d5f3dbff2dba8b89d64f2d1f70ec6865393';
   const prefix = '贝尔曼方程的数学公式根据具体场景略有不同';
@@ -764,10 +782,12 @@ test('math delimiters: exact Bellman output persists and renders in chat, share 
   const formulas = await expectBellmanMath(answer);
   await page.reload();
   await expectBellmanMath(answer);
+  await expectChatScrollContained(page);
   await answer.locator('.katex-display').first().scrollIntoViewIfNeeded();
   await evidence(page, 'delimiters-bellman-chat');
   await page.locator('button').filter({ has: page.locator('svg.lucide-chevron-left') }).click();
   await page.setViewportSize({ width: 360, height: 800 });
+  await expectChatScrollContained(page);
   const widths = await answer.locator('.katex-display').evaluateAll(elements => elements.map(element => {
     const node = element as HTMLElement;
     node.scrollLeft = 100;
@@ -803,6 +823,7 @@ test('math delimiters: exact Bellman output persists and renders in chat, share 
   const graphAnswers = page.locator('.markdown-content').filter({ hasText: prefix });
   await expect(graphAnswers).toHaveCount(2);
   for (const content of await graphAnswers.all()) await expectBellmanMath(content);
+  await expectChatScrollContained(page);
   await summary.scrollIntoViewIfNeeded();
   await evidence(page, 'delimiters-bellman-graph');
   writeFileSync(path.join(artifacts, 'delimiters-bellman.json'), JSON.stringify({ sourceSha256, persistedSha256, formulaCount: formulas.length, blockCount: 4, formulas, widths, pageWidth }, null, 2));

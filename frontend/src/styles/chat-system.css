@@ -49,6 +49,7 @@
 /* 主对话区域 */
 .main-conversation-area {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: transparent;
@@ -163,11 +164,4 @@
 @keyframes blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .chat-system-layout {
-    flex-direction: column;
-  }
 }

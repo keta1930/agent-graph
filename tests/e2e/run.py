@@ -38,6 +38,39 @@ def wait_ready(url, process=None):
     raise RuntimeError(f"Owned service did not become healthy: {url}")
 
 
+def cleanup_containers(containers, run_id):
+    """删除本次容器及匿名卷，并核实实际剩余资源。"""
+    errors = []
+    for row in reversed(containers):
+        target = row["id"] or row["name"]
+        try:
+            inspected = subprocess.run(["docker", "inspect", "--format", '{{index .Config.Labels "agent-graph-e2e"}}', target], capture_output=True, text=True, timeout=15)
+            if inspected.returncode == 0 and inspected.stdout.strip() == run_id:
+                removed = subprocess.run(["docker", "rm", "--force", "--volumes", target], capture_output=True, text=True, timeout=30)
+                if removed.returncode:
+                    errors.append("Docker cleanup failed: " + row["name"])
+        except (OSError, subprocess.SubprocessError) as error:
+            errors.append(type(error).__name__ + ": " + row["name"])
+
+    remaining_containers = []
+    remaining_volumes = []
+    for kind, command in [
+        ("containers", ["docker", "container", "ls", "--all", "--filter", "label=agent-graph-e2e=" + run_id, "--format", "{{.Names}}"]),
+        ("volumes", ["docker", "volume", "ls", "--format", "{{.Name}}"]),
+    ]:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=15, check=True)
+            names = set(result.stdout.splitlines())
+            if kind == "containers":
+                remaining_containers = sorted(names)
+            else:
+                owned = {name for row in containers for name in row["volumes"]}
+                remaining_volumes = sorted(owned & names)
+        except (OSError, subprocess.SubprocessError) as error:
+            errors.append(type(error).__name__ + ": verify " + kind)
+    return errors, remaining_containers, remaining_volumes
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run isolated real-backend browser acceptance")
     parser.add_argument("--output", type=Path)
@@ -80,7 +113,7 @@ def main():
 
     def container(kind, arguments, port):
         name = f"agent-graph-e2e-{run_id}-{kind}"
-        row = {"name": name, "id": None, "port": port}
+        row = {"name": name, "id": None, "port": port, "volumes": []}
         state["containers"].append(row)
         save()
         previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
@@ -89,6 +122,9 @@ def main():
             if result.returncode:
                 raise RuntimeError(f"Could not start isolated {kind}: {result.stderr}")
             row["id"] = result.stdout.strip()
+            save()
+            inspected = subprocess.run(["docker", "inspect", "--format", "{{json .Mounts}}", row["id"]], capture_output=True, text=True, timeout=15, check=True)
+            row["volumes"] = [mount["Name"] for mount in json.loads(inspected.stdout) if mount["Type"] == "volume"]
             save()
         finally:
             signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
@@ -206,15 +242,10 @@ def main():
             pass
         except Exception as error:
             cleanup_errors.append(type(error).__name__ + ": MCP registry/cleanup")
-        for row in reversed(state["containers"]):
-            try:
-                inspected = subprocess.run(["docker", "inspect", "--format", '{{index .Config.Labels "agent-graph-e2e"}}', row["name"]], capture_output=True, text=True, timeout=15)
-                if inspected.returncode == 0 and inspected.stdout.strip() == run_id:
-                    removed = subprocess.run(["docker", "rm", "--force", row["name"]], capture_output=True, text=True, timeout=30)
-                    if removed.returncode:
-                        cleanup_errors.append("Docker cleanup failed: " + row["name"])
-            except Exception as error:
-                cleanup_errors.append(type(error).__name__ + ": " + row["name"])
+        docker_errors, remaining_containers, remaining_volumes = cleanup_containers(state["containers"], run_id)
+        cleanup_errors.extend(docker_errors)
+        state["remaining_owned_containers"] = remaining_containers
+        state["remaining_owned_volumes"] = remaining_volumes
         state["cleanup_errors"] = cleanup_errors
         for log in logs:
             log.close()
@@ -241,7 +272,7 @@ def main():
             print((artifacts / "browser.log.redacted").read_text())
         state["remaining_owned_ports"] = [port for port in PORTS if listening(port)]
         state["user_ports_after"] = {str(port): listening(port) for port in [20050, 20051, 20052]}
-        state["cleanup_complete"] = not state["remaining_owned_ports"] and not cleanup_errors
+        state["cleanup_complete"] = not (state["remaining_owned_ports"] or remaining_containers or remaining_volumes or cleanup_errors)
         save()
         print(f"Real E2E evidence: {artifacts.relative_to(ROOT) if artifacts.is_relative_to(ROOT) else artifacts}")
         if not state["cleanup_complete"]:

@@ -12,7 +12,7 @@ it('keeps a failed draft, clears absent environment fields on record changes, an
   const submit = vi.fn().mockRejectedValue(new Error('failed'));
   const props = { visible: true, onClose: vi.fn(), onSubmit: submit, title: 'Edit' };
   const { rerender } = render(<MCPServerForm {...props} initialName="A" initialValues={config} />);
-  const env = screen.getByRole('textbox', { name: /pages.mcpManager.form.envVars/ });
+  const env = screen.getByLabelText(/pages.mcpManager.form.envVars/);
   fireEvent.change(env, { target: { value: 'EMPTY=\nOTHER=a=b' } });
   rerender(<MCPServerForm {...props} initialName="A" initialValues={{ ...config }} />);
   expect(env).toHaveValue('EMPTY=\nOTHER=a=b');
@@ -21,5 +21,5 @@ it('keeps a failed draft, clears absent environment fields on record changes, an
   expect(submit.mock.calls[0][1].env).toEqual({ EMPTY: '', OTHER: 'a=b' });
   expect(env).toHaveValue('EMPTY=\nOTHER=a=b');
   rerender(<MCPServerForm {...props} initialName="B" initialValues={{ ...config, env: undefined }} />);
-  expect(screen.getByRole('textbox', { name: /pages.mcpManager.form.envVars/ })).toHaveValue('');
+  expect(screen.getByLabelText(/pages.mcpManager.form.envVars/)).toHaveValue('');
 });

@@ -1,13 +1,9 @@
 import MarkdownCode from './MarkdownCode';
 // src/components/common/MarkdownRenderer.tsx
 import React, { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import MarkdownContent from './MarkdownContent';
 import { Card, Button, Tooltip, Space, Typography } from 'antd';
 import { CopyOutlined, EyeOutlined, FileTextOutlined } from '@ant-design/icons';
-import 'katex/dist/katex.min.css';
 
 const { Text } = Typography;
 
@@ -78,9 +74,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       }}
     >
       {previewMode ? (
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
+        <MarkdownContent
           components={{
           pre: MarkdownCode,
             a({ href, children }) {
@@ -93,7 +87,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           }}
         >
           {content || '暂无内容'}
-        </ReactMarkdown>
+        </MarkdownContent>
       ) : (
         <pre style={{
           background: '#f8f9fa',

@@ -40,6 +40,10 @@ Click the edit icon on a prompt card to open the editing dialog.
 Select prompt → Click edit → Modify category or content → Save update
 ```
 
+## Preview Mathematical Formulas
+
+The editor preview and Markdown preview cards render inline formulas such as `$E = mc^2$` or `\(E = mc^2\)`, and display formulas using separate-line `$$` delimiters or standalone `\[...\]` blocks. The editor keeps the Markdown source available for editing. See [Mathematical Formulas](../conversation/index.md#mathematical-formulas) for `math` fences, escaping dollar signs in amounts, code boundaries, and supported syntax.
+
 ## Delete a Prompt
 
 Click the delete icon on a prompt card to trigger deletion confirmation.

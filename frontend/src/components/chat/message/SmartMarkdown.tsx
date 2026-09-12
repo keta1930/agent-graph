@@ -1,6 +1,6 @@
 import { createContext, memo, useContext, useMemo, type ComponentProps } from 'react';
-import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { type Components, type ExtraProps } from 'react-markdown';
+import MarkdownContent from '../../common/MarkdownContent';
 import GlassCodeBlock from './GlassCodeBlock';
 
 interface MarkdownContextValue {
@@ -10,7 +10,6 @@ interface MarkdownContextValue {
 }
 
 const MarkdownContext = createContext<MarkdownContextValue>({ content: '', isStreaming: false });
-const remarkPlugins = [remarkGfm];
 
 /** 从 Markdown 已识别的块范围判断围栏是否仍在接收内容。 */
 function isOpenFence(source: string, quoteDepth: number) {
@@ -57,7 +56,7 @@ const SmartMarkdown = memo(function SmartMarkdown({ content, isStreaming = false
   return (
     <MarkdownContext.Provider value={value}>
       <div style={{ fontFamily: "Cambria, Georgia, 'Times New Roman', serif, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', serif", fontSize: 'inherit' }}>
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>{content}</ReactMarkdown>
+        <MarkdownContent components={components}>{content}</MarkdownContent>
       </div>
     </MarkdownContext.Provider>
   );

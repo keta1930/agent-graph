@@ -1,4 +1,5 @@
-import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -178,14 +179,33 @@ test('model edit reads actual envelope and persists advanced setting under origi
 });
 
 test('controlled upstream error releases input and next real conversation succeeds', async ({ page }) => {
-  await chooseAgent(page);
-  await submit(page, 'E2E_ERROR');
-  await expect(page.getByText(/E2E controlled model error/).first()).toBeVisible();
-  await chooseAgent(page);
-  await submit(page, 'E2E_AFTER_ERROR');
-  await expect(page.getByText('REAL_E2E_RESPONSE: E2E_AFTER_ERROR', { exact: true }).first()).toBeVisible();
-  await persisted(page, 'REAL_E2E_RESPONSE: E2E_AFTER_ERROR');
-  await evidence(page, 'error-recovered');
+  const diagnostics = {
+    pageErrors: [] as string[], consoleErrors: [] as string[],
+    scriptFailures: [] as { path: string; error: string }[],
+    scriptResponses: [] as { path: string; status: number }[],
+  };
+  page.on('pageerror', error => diagnostics.pageErrors.push(error.message));
+  page.on('console', event => {
+    if (event.type() === 'error') diagnostics.consoleErrors.push(event.text());
+  });
+  page.on('requestfailed', request => {
+    if (request.resourceType() === 'script') diagnostics.scriptFailures.push({ path: new URL(request.url()).pathname, error: request.failure()?.errorText ?? '' });
+  });
+  page.on('response', response => {
+    if (response.request().resourceType() === 'script' && response.status() >= 400) diagnostics.scriptResponses.push({ path: new URL(response.url()).pathname, status: response.status() });
+  });
+  try {
+    await chooseAgent(page);
+    await submit(page, 'E2E_ERROR');
+    await expect(page.getByText(/E2E controlled model error/).first()).toBeVisible();
+    await chooseAgent(page);
+    await submit(page, 'E2E_AFTER_ERROR');
+    await expect(page.getByText('REAL_E2E_RESPONSE: E2E_AFTER_ERROR', { exact: true }).first()).toBeVisible();
+    await persisted(page, 'REAL_E2E_RESPONSE: E2E_AFTER_ERROR');
+    await evidence(page, 'error-recovered');
+  } finally {
+    writeFileSync(path.join(artifacts, 'error-recovery-browser-diagnostics.json'), JSON.stringify(diagnostics, null, 2));
+  }
 });
 
 test('cancelling active real stream allows another conversation without late writes', async ({ page }) => {
@@ -526,4 +546,305 @@ test('Graph early next-round draft survives server-ID route commitment', async (
     writeFileSync(path.join(artifacts, 'graph-early-draft.json'), JSON.stringify(observations, null, 2));
   }
   await evidence(page, 'graph-early-draft-preserved');
+});
+
+test('math: real streaming reasoning recovers, code survives and shared formulas scroll locally', async ({ page, context, browser }) => {
+  const pageErrors: string[] = [];
+  const failedFonts: string[] = [];
+  const untrustedRequests: string[] = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  page.on('requestfailed', request => {
+    if (request.resourceType() === 'font') failedFonts.push(new URL(request.url()).pathname);
+  });
+  page.on('request', request => {
+    if (request.url().includes('invalid.example')) untrustedRequests.push(request.url());
+  });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await chooseAgent(page);
+  const submission = submit(page, 'E2E_MATH_AGENT');
+  // 先观察真实模型流中的残缺阶段，再等待 submit 完成持久化。
+  await page.getByText('AI Thinking', { exact: true }).click();
+  const reasoning = page.locator('.reasoning-scrollbar');
+  await expect(reasoning.locator('.katex-error')).toBeVisible();
+  await expect(reasoning.locator('.katex')).toBeVisible();
+  await expect(reasoning.locator('.katex-error')).toHaveCount(0);
+  const answer = page.locator('.markdown-content').filter({ has: page.getByText('MATH_ANSWER', { exact: true }) });
+  await expect(answer.locator('.katex-error')).toBeVisible();
+  await submission;
+  await expect(answer.getByText('MATH_DONE', { exact: true })).toBeVisible();
+  await expect(answer.locator('.katex-display')).toHaveCount(3);
+  await expect(answer.locator('.katex-error')).toHaveCount(1);
+  await expect(answer.locator('.katex-error')).toContainText('\\frac{1}{');
+  await expect(answer.locator('math')).not.toHaveCount(0);
+  await expect(answer.getByText('Currency: $5 and $10.', { exact: true })).toBeVisible();
+  await expect(answer.locator('a, img')).toHaveCount(0);
+  await expect(answer.locator('code').filter({ hasText: '$literal$' })).toContainText('$literal$');
+  const code = answer.locator('.code-block-scrollbar');
+  await expect(code).toContainText("const formula = '$x$';");
+  await expect(code.locator('.katex')).toHaveCount(0);
+  await answer.getByText('js', { exact: true }).click();
+  await expect(code).toHaveCount(0);
+  await answer.getByText('js', { exact: true }).click();
+  await expect(code).toContainText("const formula = '$x$';");
+  await answer.locator('[aria-label="copy"]').click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("const formula = '$x$';");
+  const id = await persisted(page, 'MATH_DONE');
+  await page.reload();
+  await expect(answer.locator('.katex-display')).toHaveCount(3);
+  await page.evaluate(() => document.fonts.ready);
+  const fonts = await page.evaluate(() => {
+    const loaded: string[] = [];
+    document.fonts.forEach(font => {
+      if (font.family.startsWith('KaTeX') && font.status === 'loaded') loaded.push(font.family);
+    });
+    return loaded;
+  });
+  expect(fonts).toContain('KaTeX_Main');
+  expect(fonts).toContain('KaTeX_Math');
+  const matrix = await answer.locator('.katex-display').nth(1).evaluate(element => {
+    const outer = element.getBoundingClientRect();
+    const inner = element.querySelector('.katex-html')!.getBoundingClientRect();
+    return { outerTop: outer.top, outerBottom: outer.bottom, innerTop: inner.top, innerBottom: inner.bottom };
+  });
+  expect(matrix.innerTop).toBeGreaterThanOrEqual(matrix.outerTop - 1);
+  expect(matrix.innerBottom).toBeLessThanOrEqual(matrix.outerBottom + 1);
+  await evidence(page, 'math-agent-desktop');
+  await page.locator('button').filter({ has: page.locator('svg.lucide-chevron-left') }).click();
+  await page.setViewportSize({ width: 360, height: 800 });
+  const block = answer.locator('.katex-display').nth(2);
+  const inline = answer.locator('p').filter({ hasText: /^Long inline:/ }).locator('.katex');
+  const widths = [];
+  for (const formula of [block, inline]) {
+    widths.push(await formula.evaluate(element => {
+      const node = element as HTMLElement;
+      node.scrollLeft = 100;
+      return { client: node.clientWidth, scroll: node.scrollWidth, offset: node.scrollLeft, overflow: getComputedStyle(node).overflowX };
+    }));
+  }
+  writeFileSync(path.join(artifacts, 'math-mobile-widths.json'), JSON.stringify(widths, null, 2));
+  for (const width of widths) {
+    expect(width.scroll).toBeGreaterThan(width.client);
+    expect(width.offset).toBeGreaterThan(0);
+    expect(width.overflow).toBe('auto');
+  }
+  const pageWidth = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }));
+  expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.width);
+  await block.scrollIntoViewIfNeeded();
+  await evidence(page, 'math-agent-mobile');
+  const shared = await api.post('/api/conversations/' + id + '/share');
+  expect(shared.ok()).toBeTruthy();
+  const shareId = (await shared.json()).share_id as string;
+  const anonymous = await browser.newContext({ baseURL: process.env.E2E_BASE_URL, viewport: { width: 360, height: 800 } });
+  try {
+    const publicPage = await anonymous.newPage();
+    await publicPage.goto('/share/' + shareId);
+    const sharedAnswer = publicPage.locator('.markdown-content').filter({ has: publicPage.getByText('MATH_ANSWER', { exact: true }) });
+    await expect(sharedAnswer.locator('.katex-display')).toHaveCount(3);
+    await expect(sharedAnswer.locator('.katex-error')).toHaveCount(1);
+    const sharedWidth = await publicPage.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }));
+    expect(sharedWidth.scroll).toBeLessThanOrEqual(sharedWidth.width);
+    await sharedAnswer.locator('.katex-display').nth(2).scrollIntoViewIfNeeded();
+    await evidence(publicPage, 'math-share-mobile');
+  } finally {
+    await anonymous.close();
+  }
+  expect(pageErrors).toEqual([]);
+  expect(failedFonts).toEqual([]);
+  expect(untrustedRequests).toEqual([]);
+  writeFileSync(path.join(artifacts, 'math-rendering.json'), JSON.stringify({ id, fonts, matrix, widths, pageWidth, pageErrors, failedFonts, untrustedRequests, reasoningRecovered: true, contentRecovered: true, copiedCode: true }, null, 2));
+});
+
+test('math: Graph node and final result use the same formulas after reload', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByText('Graph', { exact: true }).click();
+  await page.locator('.ant-select-selector').click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').filter({ hasText: graphName }).click();
+  await submit(page, 'E2E_MATH_GRAPH', '/api/graphs/execute');
+  await persisted(page, 'MATH_DONE');
+  await page.reload();
+  const summary = page.getByText('Final Result:', { exact: true }).locator('..').locator('.markdown-content');
+  await expect(summary.locator('.katex-display')).toHaveCount(3);
+  await expect(summary.locator('.katex-error')).toHaveCount(1);
+  const answers = page.locator('.markdown-content').filter({ has: page.getByText('MATH_ANSWER', { exact: true }) });
+  await expect(answers).toHaveCount(2);
+  for (const answer of await answers.all()) {
+    await expect(answer.locator('.katex-display')).toHaveCount(3);
+    await expect(answer.locator('.code-block-scrollbar')).toContainText("const formula = '$x$';");
+  }
+  await summary.scrollIntoViewIfNeeded();
+  await evidence(page, 'math-graph-final-result');
+});
+
+test('math: file split preview and prompt editor constrain long formulas', async ({ page }) => {
+  const longFormula = Array.from({ length: 60 }, (_, index) => `x_{${index}}`).join(' + ');
+  const content = `MATH_PREVIEW\n\nInline $x^2$.\n\n$$\n${longFormula}\n$$\n\n\`$literal$\`\n\n\`\`\`js\nconst formula = '$x$';\n\`\`\``;
+  const created = await api.post('/api/projects', { data: { name: 'E2E Math Preview', instruction: 'Isolated math preview' } });
+  expect(created.ok()).toBeTruthy();
+  const project = await created.json();
+  const id = (project.project_id ?? project.project?.project_id) as string;
+  const made = await api.post('/api/projects/' + id + '/files', { data: { filename: 'math.md', summary: 'Math preview', content, log: 'create' } });
+  expect(made.ok()).toBeTruthy();
+  await page.goto('/workspace/projects/' + id);
+  await page.locator('.ant-list-item').filter({ hasText: 'math.md' }).getByRole('button', { name: 'Open', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  const preview = dialog.locator('.markdown-content');
+  await expect(preview.locator('.katex-display')).toHaveCount(1);
+  await expect(preview.locator('pre')).toContainText("const formula = '$x$';");
+  await dialog.getByRole('button', { name: 'Split', exact: true }).click();
+  await expect(dialog.locator('textarea')).toHaveValue(content);
+  const measurements = [];
+  for (const viewport of [{ width: 1440, height: 1100 }, { width: 360, height: 800 }]) {
+    await page.setViewportSize(viewport);
+    const sizes = await preview.evaluate(element => {
+      const dialog = element.closest('[role="dialog"]')!;
+      const bounds = element.getBoundingClientRect();
+      const dialogBounds = dialog.getBoundingClientRect();
+      const formula = element.querySelector('.katex-display') as HTMLElement;
+      formula.scrollLeft = 100;
+      return { viewport: innerWidth, width: bounds.width, right: bounds.right, dialogWidth: dialogBounds.width, dialogRight: dialogBounds.right, formulaWidth: formula.clientWidth, formulaScroll: formula.scrollWidth, scrollLeft: formula.scrollLeft };
+    });
+    measurements.push(sizes);
+    writeFileSync(path.join(artifacts, 'math-preview-widths.json'), JSON.stringify(measurements, null, 2));
+    expect(sizes.width).toBeLessThan(sizes.dialogWidth);
+    expect(sizes.right).toBeLessThanOrEqual(sizes.dialogRight);
+    expect(sizes.formulaScroll).toBeGreaterThan(sizes.formulaWidth);
+    expect(sizes.scrollLeft).toBeGreaterThan(0);
+    await evidence(page, 'math-file-split-' + viewport.width);
+  }
+  await dialog.getByRole('button', { name: 'Close', exact: true }).first().click();
+  expect((await api.delete('/api/projects/' + id)).ok()).toBeTruthy();
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  expect((await api.post('/api/prompt/create', { data: { name: 'E2E Math Prompt', category: 'math', content } })).ok()).toBeTruthy();
+  await page.goto('/workspace/prompt-manager');
+  await page.getByRole('button', { name: /^math / }).click();
+  await page.locator('.ant-card').filter({ hasText: 'E2E Math Prompt' }).locator('svg.lucide-pen, svg.lucide-pen-line, svg.lucide-square-pen').click();
+  await expect(dialog.locator('.katex-display')).toHaveCount(1);
+  await expect(dialog.locator('textarea')).toHaveValue(content);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expect.poll(() => dialog.evaluate(element => element.getAnimations().length)).toBe(0);
+  const promptSizes = await dialog.locator('.markdown-content').evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    const dialogBounds = element.closest('[role="dialog"]')!.getBoundingClientRect();
+    const formula = element.querySelector('.katex-display') as HTMLElement;
+    formula.scrollLeft = 100;
+    return { width: bounds.width, right: bounds.right, dialogWidth: dialogBounds.width, dialogRight: dialogBounds.right, scrollLeft: formula.scrollLeft };
+  });
+  expect(promptSizes.width).toBeLessThan(promptSizes.dialogWidth);
+  expect(promptSizes.right).toBeLessThanOrEqual(promptSizes.dialogRight);
+  expect(promptSizes.scrollLeft).toBeGreaterThan(0);
+  writeFileSync(path.join(artifacts, 'math-prompt-widths.json'), JSON.stringify(promptSizes, null, 2));
+  await evidence(page, 'math-prompt-mobile');
+});
+
+async function expectBellmanMath(content: Locator) {
+  await expect(content.locator('.katex')).toHaveCount(25);
+  await expect(content.locator('.katex-display')).toHaveCount(4);
+  await expect(content.locator('.katex-error, em')).toHaveCount(0);
+  const formulas = await content.locator('annotation[encoding="application/x-tex"]').allTextContents();
+  expect(formulas).toContain('V');
+  expect(formulas.some(formula => formula.includes("V^*(s) = \\max_a") && formula.includes("V^*(s')"))).toBe(true);
+  expect(formulas.some(formula => formula.includes('Q^*(s, a)') && formula.includes("Q^*(s', a')"))).toBe(true);
+  return formulas;
+}
+
+test('math delimiters: exact Bellman output persists and renders in chat, share and Graph', async ({ page, browser }) => {
+  const sourceSha256 = 'eb4be2240800d1ce249d34316cb70d5f3dbff2dba8b89d64f2d1f70ec6865393';
+  const prefix = '贝尔曼方程的数学公式根据具体场景略有不同';
+  await chooseAgent(page);
+  await submit(page, 'E2E_MATH_DELIMITERS_EXACT');
+  const id = await persisted(page, prefix);
+  const response = await api.get('/api/conversations/' + id);
+  const conversation = await response.json() as { rounds: { messages: { role: string; content?: string }[] }[] };
+  const original = conversation.rounds.flatMap(round => round.messages)
+    .find(message => message.role === 'assistant' && message.content?.startsWith(prefix))?.content;
+  expect(original).toBeDefined();
+  const persistedSha256 = createHash('sha256').update(original!).digest('hex');
+  expect(persistedSha256).toBe(sourceSha256);
+  const answer = page.locator('.markdown-content').filter({ hasText: prefix });
+  const formulas = await expectBellmanMath(answer);
+  await page.reload();
+  await expectBellmanMath(answer);
+  await answer.locator('.katex-display').first().scrollIntoViewIfNeeded();
+  await evidence(page, 'delimiters-bellman-chat');
+  await page.locator('button').filter({ has: page.locator('svg.lucide-chevron-left') }).click();
+  await page.setViewportSize({ width: 360, height: 800 });
+  const widths = await answer.locator('.katex-display').evaluateAll(elements => elements.map(element => {
+    const node = element as HTMLElement;
+    node.scrollLeft = 100;
+    return { client: node.clientWidth, scroll: node.scrollWidth, offset: node.scrollLeft };
+  }));
+  const pageWidth = await page.evaluate(() => ({ viewport: innerWidth, scroll: document.documentElement.scrollWidth }));
+  expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.viewport);
+  expect(widths.some(width => width.scroll > width.client && width.offset > 0)).toBe(true);
+  await answer.locator('.katex-display').first().scrollIntoViewIfNeeded();
+  await evidence(page, 'delimiters-bellman-mobile');
+  const shared = await api.post('/api/conversations/' + id + '/share');
+  expect(shared.ok()).toBeTruthy();
+  const shareId = (await shared.json()).share_id as string;
+  const anonymous = await browser.newContext({ baseURL: process.env.E2E_BASE_URL });
+  try {
+    const publicPage = await anonymous.newPage();
+    await publicPage.goto('/share/' + shareId);
+    await expectBellmanMath(publicPage.locator('.markdown-content').filter({ hasText: prefix }));
+    await evidence(publicPage, 'delimiters-bellman-share');
+  } finally {
+    await anonymous.close();
+  }
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto('/chat');
+  await page.getByText('Graph', { exact: true }).click();
+  await page.locator('.ant-select-selector').click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').filter({ hasText: graphName }).click();
+  await submit(page, 'E2E_MATH_DELIMITERS_EXACT_GRAPH', '/api/graphs/execute');
+  await persisted(page, prefix);
+  await page.reload();
+  const summary = page.getByText('Final Result:', { exact: true }).locator('..').locator('.markdown-content');
+  await expectBellmanMath(summary);
+  const graphAnswers = page.locator('.markdown-content').filter({ hasText: prefix });
+  await expect(graphAnswers).toHaveCount(2);
+  for (const content of await graphAnswers.all()) await expectBellmanMath(content);
+  await summary.scrollIntoViewIfNeeded();
+  await evidence(page, 'delimiters-bellman-graph');
+  writeFileSync(path.join(artifacts, 'delimiters-bellman.json'), JSON.stringify({ sourceSha256, persistedSha256, formulaCount: formulas.length, blockCount: 4, formulas, widths, pageWidth }, null, 2));
+});
+
+test('math delimiters: split SSE delimiters preserve reasoning and later fenced code positions', async ({ page, context }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await chooseAgent(page);
+  const submission = submit(page, 'E2E_MATH_DELIMITERS_STREAM');
+  await page.getByText('AI Thinking', { exact: true }).click();
+  const reasoning = page.locator('.reasoning-scrollbar');
+  await expect(reasoning).toContainText('\\frac{3}{');
+  await expect(reasoning.locator('.katex')).toHaveCount(1);
+  await expect(reasoning.locator('annotation')).toHaveText('\\frac{3}{4}');
+  const answer = page.locator('.markdown-content').filter({ has: page.getByText('DELIMITER_ANSWER', { exact: true }) });
+  await expect(answer.locator('.katex')).toHaveCount(1);
+  await expect(answer).toContainText('\\frac{1}{');
+  await expect(answer.locator('.katex-display')).toHaveCount(1);
+  await expect(answer.locator('.code-block-scrollbar')).toContainText('\\(literal\\)');
+  await expect(answer.locator('.preview-button')).toHaveCount(0);
+  await answer.getByText('html', { exact: true }).click();
+  await expect(answer.locator('.code-block-scrollbar')).toHaveCount(0);
+  await expect(answer.getByText('DELIMITER_CODE_CLOSED', { exact: true })).toBeVisible();
+  await expect(answer.locator('.preview-button')).toBeVisible();
+  await expect(answer.locator('.code-block-scrollbar')).toHaveCount(0);
+  await answer.getByText('html', { exact: true }).click();
+  const expectedCode = '<p>\\(literal\\) \\[literal\\] $literal$</p>';
+  await expect(answer.locator('.code-block-scrollbar')).toHaveText(expectedCode);
+  await answer.locator('[aria-label="copy"]').click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(expectedCode);
+  await submission;
+  await expect(answer.locator('.katex')).toHaveCount(2);
+  await expect(answer.locator('.katex-error, .code-block-scrollbar .katex')).toHaveCount(0);
+  await expect(answer.getByText('Ordinary (V) and [V].', { exact: true })).toBeVisible();
+  await expect(answer.getByRole('link', { name: 'Link', exact: true })).toHaveAttribute('href', 'https://example.com/');
+  await expect(answer.locator('code').filter({ hasText: '\\(code\\)' })).toHaveText('\\(code\\)');
+  await expect(answer.locator('code').filter({ hasText: '\\[block\\]' })).toHaveText('\\[block\\]');
+  await persisted(page, 'DELIMITER_DONE');
+  await answer.scrollIntoViewIfNeeded();
+  await evidence(page, 'delimiters-stream-code');
+  expect(pageErrors).toEqual([]);
+  writeFileSync(path.join(artifacts, 'delimiters-stream.json'), JSON.stringify({ reasoningRecovered: true, bodyRecovered: true, splitClosingFence: true, collapsePreserved: true, codeCopied: expectedCode, pageErrors }, null, 2));
 });

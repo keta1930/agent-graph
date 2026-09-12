@@ -25,7 +25,7 @@ const StreamingBlockDisplay: React.FC<StreamingBlockDisplayProps> = ({
 }) => {
   switch (block.type) {
     case 'reasoning':
-      return <ReasoningDisplay content={block.content} />;
+      return <ReasoningDisplay content={block.content} isStreaming={!block.isComplete} conversationId={conversationId} />;
 
     case 'content':
       return (

@@ -1,0 +1,1 @@
+import{a as t}from"./api-B3rcbfjk.js";const a=async()=>(await t.get("/user/settings/title-generation-model")).data,n=async e=>{await t.post("/user/settings/title-generation-model",null,{params:{model_name:e}})},o=async e=>{await t.post("/user/settings/language",null,{params:{language:e}})};export{n as a,a as g,o as s};

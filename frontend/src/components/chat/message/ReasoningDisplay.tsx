@@ -9,13 +9,15 @@ const { Text } = Typography;
 
 interface ReasoningDisplayProps {
   content: string;
+  isStreaming?: boolean;
+  conversationId?: string;
 }
 
 /**
  * AI推理过程显示组件
  * 展示AI的思考过程和推理内容
  */
-const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ content }) => {
+const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ content, isStreaming = false, conversationId }) => {
   const t = useT();
   const [expanded, setExpanded] = useState(false);
 
@@ -73,7 +75,7 @@ const ReasoningDisplay: React.FC<ReasoningDisplayProps> = ({ content }) => {
           scrollbarColor: 'rgba(139, 115, 85, 0.3) rgba(245, 243, 240, 0.6)'
         }} className="reasoning-scrollbar">
           <div style={{ marginTop: '12px' }}>
-            <SmartMarkdown content={content} />
+            <SmartMarkdown content={content} isStreaming={isStreaming} conversationId={conversationId} />
           </div>
         </div>
       )}

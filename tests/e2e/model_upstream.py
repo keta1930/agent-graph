@@ -5,6 +5,49 @@ from pathlib import Path
 import time
 
 
+# 数据库中触发分隔符兼容问题的技术正文，保留原始字符用于回归。
+BELLMAN_CONTENT = (
+    "贝尔曼方程的数学公式根据具体场景略有不同，最核心的是**最优贝尔曼方程**（用于寻找最优决策）：\n"
+    "\n"
+    "对于**状态价值函数** \\(V\\)：\n"
+    "\\[\n"
+    "V^*(s) = \\max_a \\sum_{s', r} p(s', r \\mid s, a) \\Big[ r + \\gamma V^*(s') \\Big]\n"
+    "\\]\n"
+    "\n"
+    "其中各符号含义：\n"
+    "- \\(s\\)：当前状态  \n"
+    "- \\(a\\)：当前选择的动作  \n"
+    "- \\(s'\\)：下一状态  \n"
+    "- \\(r\\)：即时奖励  \n"
+    "- \\(p(s', r \\mid s, a)\\)：在状态 \\(s\\) 执行动作 \\(a\\) 后，转移到状态 \\(s'\\) 并获得奖励 \\(r\\) 的概率  \n"
+    "- \\(\\gamma\\)：折扣因子，取值范围 \\(0 \\le \\gamma \\le 1\\)，表示未来奖励的重要性  \n"
+    "- \\(V^*(s)\\)：从状态 \\(s\\) 出发，按照最优策略能获得的长期期望回报  \n"
+    "- \\(\\max_a\\)：在所有可能的动作中，选择使括号内期望值最大的那个动作\n"
+    "\n"
+    "---\n"
+    "\n"
+    "如果是给定某个策略 \\(\\pi\\)（不一定是最大，而是按策略行动），则有**贝尔曼期望方程**：\n"
+    "\\[\n"
+    "V^\\pi(s) = \\sum_a \\pi(a \\mid s) \\sum_{s', r} p(s', r \\mid s, a) \\Big[ r + \\gamma V^\\pi(s') \\Big]\n"
+    "\\]\n"
+    "\n"
+    "此外，还有基于**动作价值函数** \\(Q\\) 的最优贝尔曼方程：\n"
+    "\\[\n"
+    "Q^*(s, a) = \\sum_{s', r} p(s', r \\mid s, a) \\Big[ r + \\gamma \\max_{a'} Q^*(s', a') \\Big]\n"
+    "\\]\n"
+    "\n"
+    "这个公式表示：在状态 \\(s\\) 采取动作 \\(a\\)，获得即时奖励 \\(r\\)，然后转移到 \\(s'\\)，之后按照最优策略继续行动，最终得到的总期望回报。\n"
+    "\n"
+    "---\n"
+    "\n"
+    "**与之前简单版本的关系**  \n"
+    "之前提到的  \n"
+    "\\[\n"
+    "V(\\text{当前状态}) = \\max \\big[ \\text{当前奖励} + \\gamma \\times V(\\text{下一个状态}) \\big]\n"
+    "\\]  \n"
+    "正是最优贝尔曼方程的**简化思路**。数学公式中加了概率求和，是因为现实中转移和奖励往往具有随机性，需要用期望来精确描述。"
+)
+
 class ModelHandler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         return
@@ -57,7 +100,56 @@ class ModelHandler(BaseHTTPRequestHandler):
 
         try:
             emit({"role": "assistant"})
-            if "E2E_TOOL" in prompt and not results:
+            if "E2E_MATH_DELIMITERS_EXACT" in prompt:
+                for offset in range(0, len(BELLMAN_CONTENT), 73):
+                    emit({"content": BELLMAN_CONTENT[offset:offset + 73]})
+                    time.sleep(0.05)
+                emit({}, "stop")
+            elif "E2E_MATH_DELIMITERS_STREAM" in prompt:
+                # 将分隔符本身拆片，兼顾残缺内容与后续代码围栏的位置判断。
+                for delta, delay in [
+                    ({"reasoning_content": "DELIMITER_REASONING \\"}, 0.4),
+                    ({"reasoning_content": "(\\frac{3}{"}, 2),
+                    ({"reasoning_content": "4}\\"}, 0.4),
+                    ({"reasoning_content": ")"}, 0.4),
+                    ({"content": "DELIMITER_ANSWER\n\nInline \\"}, 0.4),
+                    ({"content": "(V^*(s)\\)"}, 0.4),
+                    ({"content": "\n\n\\["}, 0.4),
+                    ({"content": "\n\\frac{1}{"}, 2),
+                    ({"content": "2}\n\\"}, 0.4),
+                    ({"content": "]\n\nCode: `\\(code\\)` and `\\[block\\]`.\n\nOrdinary (V) and [V].\n\n[Link](https://example.com/)\n\n```html\n<p>\\(literal\\) \\[literal\\] $literal$</p>\n"}, 2),
+                    ({"content": "`"}, 0.4),
+                    ({"content": "`"}, 0.4),
+                    ({"content": "`\n\nDELIMITER_CODE_CLOSED"}, 2),
+                    ({"content": "\n\nDELIMITER_DONE"}, 0.4),
+                ]:
+                    emit(delta)
+                    time.sleep(delay)
+                emit({}, "stop")
+            elif "E2E_MATH" in prompt:
+                # 延长残缺公式阶段，让浏览器能验证真实 SSE 中间态及后续恢复。
+                emit({"reasoning_content": "MATH_REASONING\n\n$$\n\\frac{3}{"})
+                time.sleep(2)
+                emit({"reasoning_content": "4}\n$$\n"})
+                time.sleep(0.5)
+                emit({"content": "MATH_ANSWER\n\n$$\n\\frac{1}{"})
+                time.sleep(2)
+                emit({"content": "2}\n$$\n\nInline $x^2$.\n\n"})
+                time.sleep(0.25)
+                long_formula = " + ".join(f"x_{{{index}}}" for index in range(60))
+                emit({"content": (
+                    "Matrix:\n\n$$\n\\begin{pmatrix}a & b \\\\ c & d\\end{pmatrix}\n$$\n\n"
+                    "Long block:\n\n$$\n" + long_formula + "\n$$\n\n"
+                    "Long inline: $\\frac{" + long_formula + "}{1}$\n\n"
+                    "Code: `$literal$`\n\n```js\nconst formula = '$x$';\n```\n\n"
+                    "Currency: \\$5 and \\$10.\n\n"
+                    "Invalid: $\\frac{1}{$\n\n"
+                    "Untrusted: $\\href{javascript:alert(1)}{unsafe}$ "
+                    "$\\includegraphics{https://invalid.example/math.png}$\n\n"
+                    "MATH_DONE"
+                )})
+                emit({}, "stop")
+            elif "E2E_TOOL" in prompt and not results:
                 tool = next(name for name in tools if "e2e_add" in name)
                 emit({"tool_calls": [{"index": 0, "id": "call_e2e_add", "type": "function", "function": {"name": tool, "arguments": ""}}]})
                 emit({"tool_calls": [{"index": 0, "function": None}]})

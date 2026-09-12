@@ -2,11 +2,7 @@ import MarkdownCode from '../common/MarkdownCode';
 import React, { useState } from 'react';
 import { Input, Button, Space } from 'antd';
 import { Edit, Eye, Save, Columns2 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+import MarkdownContent from '../common/MarkdownContent';
 import { useT } from '../../i18n/hooks';
 
 const { TextArea } = Input;
@@ -44,9 +40,7 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
   // Render markdown content
   const renderMarkdown = () => (
     <div className="markdown-body">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+      <MarkdownContent
         components={{
           pre: MarkdownCode,
           table({ children }) {
@@ -93,7 +87,7 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
         }}
       >
         {content}
-      </ReactMarkdown>
+      </MarkdownContent>
     </div>
   );
 
@@ -255,8 +249,8 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
       )}
 
       {activeView === 'split' && (
-        <div style={{ display: 'flex', gap: '16px', height: '60vh' }}>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', gap: '16px', height: '60vh', minWidth: 0 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <TextArea
               value={content}
               onChange={(e) => !readOnly && onChange(e.target.value)}
@@ -280,7 +274,7 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
               placeholder={t('pages.fileManager.markdownPreview.placeholder')}
             />
           </div>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <div
               style={{
                 flex: 1,

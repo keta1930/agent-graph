@@ -1,0 +1,1 @@
+import{r as a,j as s}from"./index-kXmCKhlK.js";import{C as t}from"./CodeHighlighter-87rkqZxS.js";function i({children:r}){var e;if(!a.isValidElement(r))return s.jsx("pre",{children:r});const o=(e=/language-([^\s]+)/.exec(r.props.className??""))==null?void 0:e[1];return s.jsx(t,{code:String(r.props.children??"").replace(/\n$/,""),language:o})}export{i as M};

@@ -1,8 +1,9 @@
 import { memo } from 'react';
 import { Typography, Tag, Space } from 'antd';
+import SmartMarkdown from './SmartMarkdown';
 import { useT } from '../../../i18n/hooks';
 
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 
 const GraphSummary = memo(function GraphSummary({ executionChain, finalResult }: { executionChain?: string[][]; finalResult?: string }) {
   const t = useT();
@@ -104,7 +105,7 @@ const GraphSummary = memo(function GraphSummary({ executionChain, finalResult }:
           }}>
             {t('pages.chatSystem.messageDisplay.finalResult')}
           </Text>
-          <Paragraph style={{
+          <div style={{
             margin: 0,
             padding: '12px 14px',
             background: 'rgba(245, 243, 240, 0.6)',
@@ -114,8 +115,8 @@ const GraphSummary = memo(function GraphSummary({ executionChain, finalResult }:
             color: '#2d2d2d',
             lineHeight: '1.7',
           }}>
-            <Text>{finalResult}</Text>
-          </Paragraph>
+            <SmartMarkdown content={finalResult} />
+          </div>
         </div>
       )}
     </div>

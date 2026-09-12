@@ -1,11 +1,7 @@
 import MarkdownCode from '../common/MarkdownCode';
 import React from 'react';
 import { Input } from 'antd';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+import MarkdownContent from '../common/MarkdownContent';
 
 const { TextArea } = Input;
 
@@ -25,9 +21,7 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
   // Render markdown content
   const renderMarkdown = () => (
     <div className="markdown-body">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+      <MarkdownContent
         components={{
           pre: MarkdownCode,
           table({ children }) {
@@ -74,7 +68,7 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
         }}
       >
         {content}
-      </ReactMarkdown>
+      </MarkdownContent>
     </div>
   );
 

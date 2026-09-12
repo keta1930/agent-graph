@@ -83,6 +83,7 @@ describe('application routing and live chat streams', () => {
     });
     const getDetail = vi.spyOn(ConversationService, 'getConversationDetail').mockImplementation(async id => history(id, mode));
     render(<StrictMode><App /></StrictMode>);
+    await act(() => vi.dynamicImportSettled());
     const start = await screen.findByRole('button', { name: `Start ${mode}` });
     const mountsBefore = lifecycle.mounted.mock.calls.length;
     const unmountsBefore = lifecycle.unmounted.mock.calls.length;
@@ -136,6 +137,7 @@ describe('application routing and live chat streams', () => {
     });
     vi.spyOn(ConversationService, 'getConversationDetail').mockImplementation(async id => history(id, 'graph'));
     render(<StrictMode><App /></StrictMode>);
+    await act(() => vi.dynamicImportSettled());
     fireEvent.click(await screen.findByRole('button', { name: 'Start graph' }));
     await waitFor(() => expect(window.location.pathname).toMatch(/^\/chat\/.+/));
     expect(wire.cancel).not.toHaveBeenCalled();
@@ -158,6 +160,7 @@ describe('application routing and live chat streams', () => {
     });
     const getDetail = vi.spyOn(ConversationService, 'getConversationDetail').mockImplementation(async id => history(id, 'graph'));
     render(<StrictMode><App /></StrictMode>);
+    await act(() => vi.dynamicImportSettled());
     const start = await screen.findByRole('button', { name: 'Start graph' });
     const created = JSON.stringify({ type: 'conversation_created', conversation_id: 'server-graph-id' });
     if (timing === 'server merged') {
@@ -188,6 +191,7 @@ describe('application routing and live chat streams', () => {
     });
     vi.spyOn(ConversationService, 'getConversationDetail').mockImplementation(async id => history(id, 'agent'));
     render(<StrictMode><App /></StrictMode>);
+    await act(() => vi.dynamicImportSettled());
     fireEvent.click(await screen.findByRole('button', { name: 'Start graph' }));
     await waitFor(() => expect(window.location.pathname).toMatch(/^\/chat\/.+/));
     await act(async () => {

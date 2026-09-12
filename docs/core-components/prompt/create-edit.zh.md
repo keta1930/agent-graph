@@ -40,6 +40,10 @@
 选择 Prompt → 点击编辑 → 修改分类或内容 → 保存更新
 ```
 
+## 预览数学公式
+
+编辑器预览和 Markdown 预览卡片支持 `$E = mc^2$`、`\(E = mc^2\)` 等行内公式，以及前后 `$$` 分别独占一行或独立成块的 `\[...\]` 公式。编辑区域保留 Markdown 源码供修改。`math` 围栏、金额中的美元转义、代码边界及支持的语法详见[数学公式](../conversation/index.zh.md#mathematical-formulas)。
+
 ## 删除 Prompt
 
 点击 Prompt 卡片上的删除图标触发删除确认。

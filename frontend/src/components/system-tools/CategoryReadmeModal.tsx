@@ -2,8 +2,7 @@
 import React from 'react';
 import { Modal, Typography } from 'antd';
 import { BookOpen } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import MarkdownContent from '../common/MarkdownContent';
 import { CATEGORY_README_DATA } from '../../constants/systemToolsData';
 import { COLORS } from '../../constants/systemToolsStyles';
 import { useTranslation } from '../../i18n/hooks';
@@ -62,8 +61,7 @@ const CategoryReadmeModal: React.FC<CategoryReadmeModalProps> = ({ visible, cate
         lineHeight: '1.8',
         color: COLORS.text
       }}>
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
+        <MarkdownContent
           components={{
             h1: ({ children }) => (
               <h1 style={{
@@ -107,7 +105,7 @@ const CategoryReadmeModal: React.FC<CategoryReadmeModalProps> = ({ visible, cate
           }}
         >
           {getCategoryReadme(category) || t('pages.systemToolsManager.readmeModal.noContent')}
-        </ReactMarkdown>
+        </MarkdownContent>
       </div>
     </Modal>
   );

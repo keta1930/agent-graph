@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { message } from 'antd';
 import { StrictMode } from 'react';
 import SmartMarkdown from './SmartMarkdown';
+import katex from 'katex';
 
 vi.mock('../../../i18n/hooks', () => ({ useT: () => (key: string) => key }));
 vi.mock('../../common/CodeHighlighter', () => ({ default: ({ code, language }: { code: string; language?: string }) => <pre data-language={language}><code>{code}</code></pre> }));
@@ -70,5 +71,64 @@ describe('SmartMarkdown code state', () => {
     const copyTimer = scheduled.mock.results[copyTimerIndex].value;
     unmount();
     expect(cleared).toHaveBeenCalledWith(copyTimer);
+  });
+});
+
+describe('SmartMarkdown streaming math', () => {
+  it('typesets a fixed formula once across 30 ordinary text appends', () => {
+    const typeset = vi.spyOn(katex, 'renderToString');
+    const content = '$x_{streamCacheRegression}$\n\n';
+    const { rerender } = render(<SmartMarkdown content={content} isStreaming />);
+    for (let i = 1; i <= 30; i++) {
+      rerender(<SmartMarkdown content={content + 'more '.repeat(i)} isStreaming />);
+    }
+    expect(typeset).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers through partial delimiters and invalid TeX while preserving nearby fence offsets', () => {
+    const { container, rerender } = render(<SmartMarkdown content="$" isStreaming />);
+    for (const content of ['$\\frac', '$\\frac{1}{$', '$\\frac{1}{2}$']) {
+      rerender(<SmartMarkdown content={content} isStreaming />);
+    }
+    expect(container.querySelector('.katex-error')).not.toBeInTheDocument();
+    expect(container.querySelector('.katex')).toBeInTheDocument();
+    rerender(<SmartMarkdown content={'$\\frac{1}{2}$\n\n> ```javascript\n> const value = 1;\n> ```'} isStreaming />);
+    expect(screen.getByTestId('preview-state')).toHaveTextContent('false');
+    rerender(<SmartMarkdown content={'$\\frac{1}{2}$\n\n```javascript\nconst value = 1;'} isStreaming />);
+    expect(screen.getByTestId('preview-state')).toHaveTextContent('true');
+  });
+});
+
+describe('SmartMarkdown model delimiter integration', () => {
+  it('reuses bracket-delimited math through 30 text appends and equivalent dollar syntax', () => {
+    const typeset = vi.spyOn(katex, 'renderToString');
+    const formula = 'x_{bracketCacheRegression}';
+    const content = `\\(${formula}\\)\n\n`;
+    const { rerender } = render(<SmartMarkdown content={content} isStreaming />);
+    for (let i = 1; i <= 30; i++) {
+      rerender(<SmartMarkdown content={content + 'more '.repeat(i)} isStreaming />);
+    }
+    rerender(<SmartMarkdown content={`$${formula}$`} />);
+    expect(typeset).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['\n', '\r\n'])('keeps fence streaming state after Unicode and model math (%j)', (eol) => {
+    const prefix = ['中文😀 \\(x^*\\)', '', '\\[y\\]', ''].join(eol);
+    const { rerender } = render(<SmartMarkdown content={prefix + eol + '```javascript' + eol + 'const n = 1;'} isStreaming />);
+    expect(screen.getByTestId('preview-state')).toHaveTextContent('true');
+    rerender(<SmartMarkdown content={prefix + eol + '> ```javascript' + eol + '> const n = 1;' + eol + '> ```'} isStreaming />);
+    expect(screen.getByTestId('preview-state')).toHaveTextContent('false');
+    rerender(<SmartMarkdown content={prefix + eol + '- ```javascript' + eol + '  const n = 1;' + eol + '  ```'} isStreaming />);
+    expect(screen.getByTestId('preview-state')).toHaveTextContent('false');
+  });
+
+  it('keeps a completed code block collapsed as bracket math arrives', () => {
+    const content = '```javascript\nconst stable = 1;\n```\n\n';
+    const { rerender } = render(<SmartMarkdown content={content} isStreaming />);
+    fireEvent.click(screen.getByText('javascript'));
+    for (const tail of ['\\(', '\\(x', '\\(x\\)', '\\(x\\) later text']) {
+      rerender(<SmartMarkdown content={content + tail} isStreaming />);
+      expect(screen.queryByText('const stable = 1;')).not.toBeInTheDocument();
+    }
   });
 });

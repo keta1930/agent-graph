@@ -16,6 +16,10 @@ class MongoDBClient:
     """MongoDB服务管理"""
 
     def __init__(self):
+        self._reset_connection()
+
+    def _reset_connection(self):
+        """清除客户端及绑定到该连接的仓储引用。"""
         self.client: Optional[AsyncIOMotorClient] = None
         self.db = None
 
@@ -59,6 +63,7 @@ class MongoDBClient:
 
     async def initialize(self, connection_string: str, database_name: str = None):
         """初始化MongoDB连接"""
+        await self.disconnect()
         try:
             self.client = AsyncIOMotorClient(
                 connection_string,
@@ -96,9 +101,12 @@ class MongoDBClient:
             self.is_connected = True
             logger.info("MongoDB连接成功建立")
 
-        except Exception as e:
-            logger.error(f"MongoDB连接失败: {str(e)}")
-            self.is_connected = False
+        except BaseException:
+            logger.exception("MongoDB连接初始化失败")
+            try:
+                await self.disconnect()
+            except Exception:
+                logger.exception("回收初始化失败的MongoDB连接时出错")
             raise
 
     def _initialize_managers(self):
@@ -275,9 +283,10 @@ class MongoDBClient:
 
     async def disconnect(self):
         """断开MongoDB连接"""
-        if self.client:
-            self.client.close()
-            self.is_connected = False
+        client = self.client
+        self._reset_connection()
+        if client is not None:
+            client.close()
             logger.info("MongoDB连接已断开")
 
     # === 对话管理方法 ===

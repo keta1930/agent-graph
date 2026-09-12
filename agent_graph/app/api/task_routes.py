@@ -5,6 +5,7 @@ from datetime import datetime
 
 from agent_graph.app.services.task.task_service import task_service
 from agent_graph.app.services.task.task_scheduler import task_scheduler
+from agent_graph.app.services.task.scheduling import build_task_trigger
 from agent_graph.app.models.task_schema import TaskCreate, TaskStatusUpdate, TaskSummary, Task, TaskStatus
 from agent_graph.app.auth.dependencies import get_current_user
 from agent_graph.app.models.auth_schema import CurrentUser
@@ -12,6 +13,16 @@ from agent_graph.app.models.auth_schema import CurrentUser
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["tasks"])
+
+async def record_schedule_failure(task_id: str, user_id: str) -> None:
+    """停止残留调度，确认错误状态持久化后再向调用者声明。"""
+    removed = await task_scheduler.remove_task(task_id)
+    result = await task_service.update_task_status(task_id, TaskStatus.ERROR, user_id=user_id)
+    if result.get('status') != 'success':
+        raise HTTPException(status_code=500, detail=f"任务 {task_id} 调度失败，保存error状态失败，请检查任务状态")
+    if not removed:
+        raise HTTPException(status_code=500, detail=f"任务 {task_id} 状态已设为error，但停止旧调度失败")
+
 
 # ======= 任务管理 =======
 
@@ -21,21 +32,10 @@ async def create_task(task: TaskCreate, current_user: CurrentUser = Depends(get_
     try:
         # 设置任务的user_id
         task.user_id = current_user.user_id
-        # 验证单次执行任务的时间
-        if task.schedule_type.value == "single":
-            execute_at = task.schedule_config.execute_at
-            if not execute_at:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="单次执行任务必须指定执行时间"
-                )
-
-            # 检查执行时间是否在当前时间之后
-            if execute_at <= datetime.now():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"单次执行任务的时间不能在当前时间之前。指定时间: {execute_at}, 当前时间: {datetime.now()}"
-                )
+        try:
+            build_task_trigger(task.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         # 创建任务
         result = await task_service.create_task(task, user_id=current_user.user_id)
@@ -65,6 +65,8 @@ async def create_task(task: TaskCreate, current_user: CurrentUser = Depends(get_
         schedule_success = await task_scheduler.schedule_task(created_task)
         if not schedule_success:
             logger.warning(f"任务 {task_id} 创建成功但调度失败")
+            await record_schedule_failure(task_id, current_user.user_id)
+            created_task["status"] = TaskStatus.ERROR
 
         return {
             "status": "success",
@@ -186,6 +188,12 @@ async def update_task_status(
                 detail="无权限操作此任务"
             )
 
+        if status_update.status.value == 'active':
+            try:
+                build_task_trigger(task)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         # 更新任务状态
         result = await task_service.update_task_status(task_id, status_update.status.value, user_id=current_user.user_id)
         if result.get("status") == "error":
@@ -198,12 +206,14 @@ async def update_task_status(
         if status_update.status.value == "active":
             # 重新调度任务
             updated_task = await task_service.get_task(task_id, user_id=current_user.user_id)
-            if updated_task:
-                await task_scheduler.schedule_task(updated_task)
+            scheduled = updated_task and await task_scheduler.schedule_task(updated_task)
+            if not scheduled:
+                await record_schedule_failure(task_id, current_user.user_id)
+                raise HTTPException(status_code=500, detail="任务调度失败，状态已设为error")
         elif status_update.status.value == "paused":
             # 暂停调度
             await task_scheduler.pause_task(task_id)
-        elif status_update.status.value == "completed":
+        elif status_update.status.value in {"completed", "error"}:
             # 移除已完成任务的调度
             await task_scheduler.remove_task(task_id)
 

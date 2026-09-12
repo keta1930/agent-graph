@@ -1,8 +1,11 @@
+from agent_graph.app.services.graph.graph_resources import add_graph_readme
+from contextlib import aclosing
 import logging
 from typing import Annotated, Any, Dict, List
 
 from asyncer import asyncify
 from fastapi import APIRouter, HTTPException, status, Depends
+from agent_graph.app.api.stream_response import ClosingStreamingResponse
 from fastapi.responses import StreamingResponse, JSONResponse, Response
 from agent_graph.app.services.model.model_service import model_service
 from agent_graph.app.services.graph.graph_service import graph_service
@@ -124,32 +127,7 @@ async def create_graph(graph: GraphConfig, current_user: CurrentUser = Depends(g
 
         graph_dict = graph.model_dump()
 
-        mcp_config_data = await mongodb_client.get_mcp_config()
-        mcp_config = mcp_config_data.get("config", {"mcpServers": {}}) if mcp_config_data else {"mcpServers": {}}
-        filtered_mcp_config = {"mcpServers": {}}
-
-        used_servers = set()
-        for node in graph_dict.get("nodes", []):
-            for server in node.get("mcp_servers", []):
-                used_servers.add(server)
-
-        for server_name in used_servers:
-            if server_name in mcp_config.get("mcpServers", {}):
-                filtered_mcp_config["mcpServers"][server_name] = mcp_config["mcpServers"][server_name]
-
-        used_models = set()
-        for node in graph_dict.get("nodes", []):
-            if node.get("model_name"):
-                used_models.add(node.get("model_name"))
-
-        model_configs = []
-        all_models = await model_service.get_all_models(user_id=current_user.user_id)
-        for model in all_models:
-            if model["name"] in used_models:
-                model_configs.append(model)
-
-        readme_content = FlowDiagram.generate_graph_readme(graph_dict, filtered_mcp_config, model_configs)
-        graph_dict["readme"] = readme_content
+        await add_graph_readme(graph_dict, current_user.user_id)
 
         success = await graph_service.save_graph(graph.name, graph_dict, user_id=current_user.user_id)
         if not success:
@@ -323,22 +301,24 @@ async def execute_graph(input_data: GraphInput, current_user: CurrentUser = Depe
                 try:
                     if input_data.conversation_id:
                         # 继续现有会话
-                        async for sse_data in graph_service.continue_conversation_stream(
+                        async with aclosing(graph_service.continue_conversation_stream(
                                 input_data.conversation_id,
                                 input_data.input_text,
                                 continue_from_checkpoint=input_data.continue_from_checkpoint,
                                 user_id=current_user.user_id
-                        ):
-                            yield sse_data
+                        )) as owned_stream:
+                            async for sse_data in owned_stream:
+                                yield sse_data
                     else:
                         # 创建新会话
-                        async for sse_data in graph_service.execute_graph_stream(
+                        async with aclosing(graph_service.execute_graph_stream(
                                 input_data.graph_name,
                                 input_data.input_text,
                                 graph_config,
                                 user_id=current_user.user_id
-                        ):
-                            yield sse_data
+                        )) as owned_stream:
+                            async for sse_data in owned_stream:
+                                yield sse_data
 
                     # 发送完成标记
                     yield SSEHelper.format_done()
@@ -351,7 +331,7 @@ async def execute_graph(input_data: GraphInput, current_user: CurrentUser = Depe
                     yield SSEHelper.send_error(f"执行图时出错: {str(e)}")
                     yield SSEHelper.format_done()
 
-            return StreamingResponse(
+            return ClosingStreamingResponse(
                 generate_hybrid_stream(),
                 media_type="text/event-stream",
                 headers={

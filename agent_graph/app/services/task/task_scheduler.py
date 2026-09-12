@@ -1,13 +1,16 @@
+import asyncio
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.date import DateTrigger
-from apscheduler.triggers.cron import CronTrigger
+from apscheduler.events import EVENT_SCHEDULER_SHUTDOWN
+from anyio import CancelScope
 from apscheduler.jobstores.memory import MemoryJobStore
+from apscheduler.jobstores.base import JobLookupError
 from apscheduler.executors.asyncio import AsyncIOExecutor
-from agent_graph.app.models.task_schema import TaskStatus
+from agent_graph.app.models.task_schema import TaskStatus, local_datetime
 from agent_graph.app.services.task.task_service import task_service
+from agent_graph.app.services.task.scheduling import build_task_trigger
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +22,15 @@ class TaskScheduler:
         """初始化任务调度器"""
         self.scheduler: Optional[AsyncIOScheduler] = None
         self._initialized = False
+        self._stopping = False
+        self._running_jobs = set()
+        self._shutdown_waiter = None
 
     def initialize(self):
         """初始化调度器"""
-        if self._initialized:
+        if self._initialized or self._shutdown_waiter is not None:
             return
+        self._stopping = False
 
         try:
             # 配置调度器
@@ -53,76 +60,71 @@ class TaskScheduler:
             self._initialized = False
 
     async def shutdown(self):
-        """关闭调度器"""
-        if self.scheduler and self.scheduler.running:
-            self.scheduler.shutdown(wait=True)
-            logger.info("任务调度器已关闭")
+        """停止触发并等待运行任务清理和调度器关闭。"""
+        if self._shutdown_waiter is not None:
+            await asyncio.shield(self._shutdown_waiter)
+            return
+        self._stopping = True
+        waiter = asyncio.get_running_loop().create_future()
+        self._shutdown_waiter = waiter
+        scheduler = self.scheduler
+        cancelled = False
+
+        async def wait_until_done(work):
+            nonlocal cancelled
+            with CancelScope(shield=True):
+                while not work.done():
+                    try:
+                        await asyncio.shield(work)
+                    except asyncio.CancelledError:
+                        cancelled = True
+            return work.result()
+
+        try:
+            if scheduler and scheduler.running:
+                scheduler.pause()
+            jobs = list(self._running_jobs)
+            for job in jobs:
+                job.cancel()
+            if jobs:
+                await wait_until_done(asyncio.gather(*jobs, return_exceptions=True))
+            if scheduler and scheduler.running:
+                stopped = asyncio.get_running_loop().create_future()
+                def on_shutdown(event):
+                    if not stopped.done():
+                        stopped.set_result(None)
+                scheduler.add_listener(on_shutdown, EVENT_SCHEDULER_SHUTDOWN)
+                try:
+                    scheduler.shutdown(wait=True)
+                    await wait_until_done(stopped)
+                finally:
+                    scheduler.remove_listener(on_shutdown)
+        finally:
+            self.scheduler = None
+            self._initialized = False
+            self._shutdown_waiter = None
+            if not waiter.done():
+                waiter.set_result(None)
+        if cancelled:
+            raise asyncio.CancelledError
 
     async def schedule_task(self, task: Dict[str, Any]) -> bool:
         """调度任务"""
         try:
+            if self._stopping:
+                return False
+            trigger = build_task_trigger(task)
             if not self._initialized:
                 self.initialize()
-
             if not self.scheduler:
-                raise Exception("调度器未初始化")
-
-            task_id = task.get("id")
-            schedule_type = task.get("schedule_type")
-            schedule_config = task.get("schedule_config", {})
-
-            # 删除已存在的同名任务
-            await self.remove_task(task_id)
-
-            if schedule_type == "single":
-                # 单次执行任务
-                execute_at = schedule_config.get("execute_at")
-                if not execute_at:
-                    raise Exception("单次执行任务必须指定执行时间")
-                # 过时的单次任务不加入调度器
-                if execute_at <= datetime.now():
-                    logger.warning(f"单次任务 {task_id} 的执行时间已过期（{execute_at}），跳过调度")
-                    return False
-
-                # 调度单次执行
-                trigger = DateTrigger(run_date=execute_at)
-                self.scheduler.add_job(
-                    func=self._execute_and_cleanup_single_task,
-                    trigger=trigger,
-                    args=[task],
-                    id=task_id,
-                    name=f"Single Task: {task.get('task_name', task_id)}"
-                )
-
-            elif schedule_type == "recurring":
-                # 周期性执行任务
-                cron_expression = schedule_config.get("cron_expression")
-                if not cron_expression:
-                    raise Exception("周期性任务缺少cron表达式")
-
-                # 解析cron表达式
-                cron_parts = cron_expression.split()
-                if len(cron_parts) != 5:
-                    raise Exception(f"无效的cron表达式: {cron_expression}")
-
-                trigger = CronTrigger(
-                    minute=cron_parts[0],
-                    hour=cron_parts[1],
-                    day=cron_parts[2],
-                    month=cron_parts[3],
-                    day_of_week=cron_parts[4]
-                )
-
-                self.scheduler.add_job(
-                    func=self._execute_task_wrapper,
-                    trigger=trigger,
-                    args=[task],
-                    id=task_id,
-                    name=f"Recurring Task: {task.get('task_name', task_id)}"
-                )
-
-            else:
-                raise Exception(f"不支持的调度类型: {schedule_type}")
+                raise RuntimeError("调度器未初始化")
+            task_id = task['id']
+            schedule_type = task['schedule_type']
+            execute = self._execute_and_cleanup_single_task if schedule_type == 'single' else self._execute_task_wrapper
+            self.scheduler.add_job(
+                func=execute, trigger=trigger, args=[task], id=task_id,
+                name=f"Task: {task.get('task_name', task_id)}", replace_existing=True,
+            )
 
             logger.info(f"任务 {task_id} 调度成功，类型: {schedule_type}")
             return True
@@ -140,8 +142,7 @@ class TaskScheduler:
             try:
                 self.scheduler.remove_job(task_id)
                 logger.info(f"已移除调度任务: {task_id}")
-            except Exception:
-                # 任务可能不存在，忽略错误
+            except JobLookupError:
                 pass
 
             return True
@@ -179,44 +180,31 @@ class TaskScheduler:
             return False
 
     async def _execute_task_wrapper(self, task: Dict[str, Any]):
-        """任务执行包装器"""
-        try:
-            task_id = task.get("id")
-            logger.info(f"开始执行调度任务: {task_id}")
-
-            # 执行任务
-            conversation_ids = await task_service.execute_task(task)
-
-            if conversation_ids:
-                logger.info(f"任务 {task_id} 执行成功，启动了 {len(conversation_ids)} 个图实例")
-            else:
-                logger.warning(f"任务 {task_id} 执行失败或未启动任何图实例")
-
-        except Exception as e:
-            logger.error(f"执行调度任务失败: {str(e)}")
+        """执行一次周期任务并返回实际启动的会话。"""
+        return await self._run_task(task, single=False)
 
     async def _execute_and_cleanup_single_task(self, task: Dict[str, Any]):
-        """执行单次任务并设置为已完成状态"""
+        """按启动结果保存单次任务终态。"""
+        return await self._run_task(task, single=True)
+
+    async def _run_task(self, task: Dict[str, Any], *, single: bool):
+        """跟踪执行及状态保存，使 shutdown 能等待整个任务退出。"""
+        if self._stopping:
+            return []
+        running = asyncio.current_task()
+        self._running_jobs.add(running)
         try:
-            # 执行任务
-            await self._execute_task_wrapper(task)
-
-            # 将单次任务状态设置为已完成
-            task_id = task.get("id")
-            await self._complete_single_task(task_id)
-
-        except Exception as e:
-            logger.error(f"执行单次任务失败: {str(e)}")
-
-    async def _complete_single_task(self, task_id: str):
-        """将单次任务设置为已完成状态"""
-        try:
-            # 将任务状态设置为已完成
-            await task_service.update_task_status(task_id, TaskStatus.COMPLETED)
-            logger.info(f"单次任务 {task_id} 已设置为完成状态")
-
-        except Exception as e:
-            logger.error(f"设置单次任务完成状态失败: {str(e)}")
+            try:
+                conversation_ids = await task_service.execute_task(task)
+            except Exception:
+                logger.exception("执行调度任务失败: %s", task.get('id'))
+                conversation_ids = []
+            if single:
+                status = TaskStatus.COMPLETED if conversation_ids else TaskStatus.ERROR
+                await task_service.update_task_status(task['id'], status)
+            return conversation_ids
+        finally:
+            self._running_jobs.discard(running)
 
     def get_scheduled_jobs(self) -> list:
         """获取所有调度中的任务"""
@@ -256,7 +244,7 @@ class TaskScheduler:
                     schedule_type = task.get("schedule_type")
                     schedule_config = task.get("schedule_config", {})
                     execute_at = schedule_config.get("execute_at") if schedule_config else None
-                    if schedule_type == "single" and execute_at and execute_at <= datetime.now():
+                    if schedule_type == "single" and execute_at and local_datetime(execute_at) <= datetime.now():
                         from agent_graph.app.models.task_schema import TaskStatus
                         await task_service.update_task_status(task.get("id"), TaskStatus.ERROR)
                         logger.warning(f"发现过期的单次任务 {task.get('id')}（执行时间 {execute_at}），状态已标记为 error，跳过调度")

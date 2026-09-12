@@ -590,14 +590,14 @@ class ConversationRepository:
         """
         try:
             now = datetime.now()
-            update_fields = {"documents.$.updated_at": now, "updated_at": now}
+            update_fields = {"documents.files.$.updated_at": now, "updated_at": now}
 
             if summary is not None:
-                update_fields["documents.$.summary"] = summary
+                update_fields["documents.files.$.summary"] = summary
             if size is not None:
-                update_fields["documents.$.size"] = size
+                update_fields["documents.files.$.size"] = size
             if version_id is not None:
-                update_fields["documents.$.current_version_id"] = version_id
+                update_fields["documents.files.$.current_version_id"] = version_id
 
             update_operations = {"$set": update_fields}
 
@@ -612,7 +612,7 @@ class ConversationRepository:
                 }
                 # 添加到数组开头（最新的在前）
                 update_operations["$push"] = {
-                    "documents.$.logs": {
+                    "documents.files.$.logs": {
                         "$each": [log_entry],
                         "$position": 0
                     }

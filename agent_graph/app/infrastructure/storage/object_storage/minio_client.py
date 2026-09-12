@@ -199,9 +199,13 @@ class MinIOClient:
                 bucket_name=self.bucket_name,
                 object_name=object_name
             )
-            content = response.read().decode('utf-8')
-            response.close()
-            response.release_conn()
+            try:
+                content = response.read().decode('utf-8')
+            finally:
+                try:
+                    response.close()
+                finally:
+                    response.release_conn()
             logger.info(f"内容获取成功: {object_name}")
             return content
         except S3Error as e:

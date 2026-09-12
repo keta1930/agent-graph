@@ -4,6 +4,8 @@ import time
 import copy
 from datetime import datetime
 import threading
+from collections import OrderedDict
+from agent_graph.app.services.graph.execution_runtime import GraphExecutionRuntime
 from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -16,9 +18,12 @@ class ConversationManager:
         """
         初始化会话管理器
         """
-        self.active_conversations: Dict[str, Dict[str, Any]] = {}
+        self.active_conversations: Dict[str, Dict[str, Any]] = OrderedDict()
+        self.runtime = GraphExecutionRuntime()
         self._conversation_lock = threading.Lock()
         self._active_conversation_ids = set()
+        self._dirty_conversation_ids = set()
+        self._restore_reads = {}
 
     def _generate_unique_conversation_id(self, graph_name: str, max_retries: int = 10) -> str:
         """生成唯一的会话ID"""
@@ -49,6 +54,7 @@ class ConversationManager:
 
     async def create_conversation(self, graph_name: str, graph_config: Dict[str, Any], user_id: str = "default_user") -> str:
         """创建新的会话，使用MongoDB存储"""
+        self._trim_cache()
         conversation_id = self._generate_unique_conversation_id(graph_name)
         start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
@@ -80,7 +86,7 @@ class ConversationManager:
             logger.info(f"成功创建会话: {conversation_id}")
             return conversation_id
 
-        except Exception as e:
+        except BaseException:
             self._cleanup_failed_conversation(conversation_id)
             raise
 
@@ -88,24 +94,50 @@ class ConversationManager:
         """使用指定配置创建新的会话"""
         return await self.create_conversation(graph_name, graph_config, user_id)
 
+    def release_conversation(self, conversation_id):
+        """已持久化的执行状态可随时从 MongoDB 恢复。"""
+        self.active_conversations.pop(conversation_id, None)
+        self._active_conversation_ids.discard(conversation_id)
+        self._dirty_conversation_ids.discard(conversation_id)
+        # 旧读取可能在成功保存并释放后才返回，不能再安装释放前的快照。
+        self._restore_reads.pop(conversation_id, None)
+
+    def _trim_cache(self):
+        """限制查询恢复的闲置缓存，执行中的会话由执行者释放。"""
+        idle = [key for key in self.active_conversations if key not in self.runtime.owners and key not in self._dirty_conversation_ids]
+        for key in idle[:-128]:
+            self.release_conversation(key)
+
     async def get_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         """获取会话状态，优先从内存获取，否则从MongoDB恢复"""
-        if conversation_id in self.active_conversations:
-            return self.active_conversations[conversation_id]
-
         from agent_graph.app.infrastructure.database.mongodb import mongodb_client
-        conversation_data = await mongodb_client.get_graph_run_conversation(conversation_id)
+        while True:
+            if conversation_id in self.active_conversations:
+                return self.active_conversations[conversation_id]
 
-        if conversation_data:
-            logger.info(f"从MongoDB恢复会话 {conversation_id}")
-            conversation = self._restore_conversation_from_mongodb(conversation_data)
-            if conversation:
-                self.active_conversations[conversation_id] = conversation
-                return conversation
-            else:
-                logger.error(f"无法从MongoDB恢复会话 {conversation_id}")
-
-        return None
+            # 集合 identity 表示在途读取代际，登记只保留到最后一个读者退出。
+            readers = self._restore_reads.setdefault(conversation_id, set())
+            reader = object()
+            readers.add(reader)
+            try:
+                conversation_data = await mongodb_client.get_graph_run_conversation(conversation_id)
+                if conversation_id in self.active_conversations:
+                    return self.active_conversations[conversation_id]
+                if self._restore_reads.get(conversation_id) is not readers:
+                    continue
+                if conversation_data:
+                    conversation = self._restore_conversation_from_mongodb(conversation_data)
+                    if conversation:
+                        logger.info(f"从MongoDB恢复会话 {conversation_id}")
+                        self.active_conversations[conversation_id] = conversation
+                        self._trim_cache()
+                        return conversation
+                    logger.error(f"无法从MongoDB恢复会话 {conversation_id}")
+                return None
+            finally:
+                readers.discard(reader)
+                if not readers and self._restore_reads.get(conversation_id) is readers:
+                    self._restore_reads.pop(conversation_id)
 
     async def update_conversation_file(self, conversation_id: str) -> bool:
         """更新会话到MongoDB"""
@@ -114,13 +146,16 @@ class ConversationManager:
             return False
 
         conversation = self.active_conversations[conversation_id]
+        # 仅确认写入成功后清除；取消或超时也必须保留未落盘状态。
+        self._dirty_conversation_ids.add(conversation_id)
 
         try:
             update_data = self._prepare_mongodb_data(conversation)
 
             from agent_graph.app.infrastructure.database.mongodb import mongodb_client
             success = await mongodb_client.update_graph_run_data(conversation_id, update_data)
-
+            if success:
+                self._dirty_conversation_ids.discard(conversation_id)
             return success
         except Exception as e:
             logger.error(f"更新会话到MongoDB {conversation_id} 时出错: {str(e)}")
@@ -237,7 +272,8 @@ class ConversationManager:
         if has_handoffs and handoffs_status:
             used_count = handoffs_status.get("used_count", 0)
             total_limit = handoffs_status.get("total_limit", 0)
-            last_selection = handoffs_status.get("last_selection")
+            from agent_graph.app.services.graph.handoffs_manager import HandoffsManager
+            last_selection = HandoffsManager.extract_handoffs_selection(last_round)
 
             if used_count <= total_limit and last_selection:
                 return {
@@ -252,12 +288,19 @@ class ConversationManager:
                     "message": f"等待handoffs选择，剩余次数: {total_limit - used_count}"
                 }
 
-        next_level = last_round.get("level", 0) + 1
-        return {
-            "action": "continue",
-            "from_level": next_level,
-            "message": f"从层级 {next_level} 继续执行"
-        }
+        # handoffs 目标结束后沿用下一层语义，避免恢复时补跑未选中的同层分支。
+        if len(rounds) > 1:
+            from agent_graph.app.services.graph.handoffs_manager import HandoffsManager
+            previous = rounds[-2]
+            if HandoffsManager.extract_handoffs_selection(previous) == last_node_name:
+                return {"action": "continue", "from_level": last_round.get("level", 0) + 1}
+
+        nodes = sorted(graph_config.get("nodes", []), key=lambda node: node.get("level", 0))
+        index = next(i for i, node in enumerate(nodes) if node["name"] == last_node_name)
+        if index + 1 < len(nodes):
+            next_node = nodes[index + 1]
+            return {"action": "continue", "from_level": next_node.get("level", 0), "next_node": next_node["name"]}
+        return {"action": "continue", "from_level": last_round.get("level", 0) + 1}
 
     async def _get_final_output(self, conversation: Dict[str, Any]) -> str:
         """获取图的最终输出"""

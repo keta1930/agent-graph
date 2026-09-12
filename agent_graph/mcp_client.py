@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Dict, Any, Optional
 import uvicorn
+from asyncer import asyncify
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from mcp import ClientSession
@@ -22,20 +23,54 @@ logger = logging.getLogger("mcp_client")
 
 SERVERS = {}
 CONFIG = {}
+_server_locks: dict[str, asyncio.Lock] = {}
+_config_lock = asyncio.Lock()
+_closing = False
+_shutdown_task: asyncio.Task | None = None
+
+
+def _server_lock(name: str) -> asyncio.Lock:
+    """对同名服务器串行变更，保留异名服务器并发。"""
+    return _server_locks.setdefault(name, asyncio.Lock())
+
+
+async def _cleanup_registered_server(name: str) -> None:
+    """等待同名连接请求结束，再清理注册的实例。"""
+    async with _server_lock(name):
+        server = SERVERS.get(name)
+        if server is not None:
+            await server.cleanup()
+            SERVERS.pop(name, None)
+
+
+async def _cleanup_servers() -> None:
+    """停止接收配置与连接请求，等待所有连接退出。"""
+    global _closing
+    async with _config_lock:
+        _closing = True
+        results = await asyncio.gather(
+            *(_cleanup_registered_server(name) for name in list(SERVERS)),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.error("清理 MCP 连接失败: %s", result)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """管理 MCP server 连接的生命周期。"""
+    global _closing, _config_lock, _server_locks, _shutdown_task
+    _closing = False
+    _config_lock = asyncio.Lock()
+    _server_locks = {}
+    _shutdown_task = None
     logger.info("MCP 客户端启动")
     try:
         yield
     finally:
         logger.info("MCP 客户端关闭")
-        await asyncio.gather(
-            *(server.cleanup() for server in SERVERS.values()),
-            return_exceptions=True,
-        )
+        await _cleanup_servers()
 
 
 app = FastAPI(
@@ -46,7 +81,7 @@ app = FastAPI(
 
 
 class MCPServer:
-    """表示单个MCP服务器的类"""
+    """管理单个 MCP 服务器的连接、工具调用与子进程。"""
 
     def __init__(self, name: str, config: Dict[str, Any]):
         self.name = name
@@ -54,374 +89,233 @@ class MCPServer:
         self.session: Optional[ClientSession] = None
         self.stdio = None
         self.write = None
-        self.exit_stack = AsyncExitStack()
         self.tools = []
         self.error = None
         self.init_attempted = False
-        self._call_lock = asyncio.Lock()
-        self.ai_process = None  # AI生成工具的进程
+        self.ai_process = None
         self.is_ai_generated = config.get("ai_generated", False)
+        self._connected = False
+        self._lifecycle_lock = asyncio.Lock()
+        self._call_lock = asyncio.Lock()
+        self._owner: asyncio.Task | None = None
+        self._stop = asyncio.Event()
 
     async def connect(self) -> bool:
-        """连接到服务器，返回是否成功"""
-        if self.config.get('disabled', False):
-            logger.info(f"服务器 '{self.name}' 已禁用，跳过连接")
-            self.error = "服务器已禁用"
-            self.init_attempted = True
-            return False
-
-        try:
-            # 如果是AI生成的工具，先启动进程
-            if self.is_ai_generated:
-                if not await self._start_ai_process():
-                    return False
-                
-                # 等待AI进程启动
-                await asyncio.sleep(3)
-
-            # 获取传输类型
-            transport_type = self.config.get('transportType', 'stdio')
-            
-            # 设置超时
-            timeout = self.config.get('timeout', 10) 
-
-            # 添加超时机制
+        """等待专属任务建立连接，重复请求复用已连接会话。"""
+        async with self._lifecycle_lock:
+            if self.is_connected():
+                return True
+            if self._owner is not None:
+                await self._wait_owner()
+            self.error = None
+            self.init_attempted = False
+            self._stop = asyncio.Event()
+            ready = asyncio.get_running_loop().create_future()
+            self._owner = asyncio.create_task(
+                self._run_connection(ready), name=f"mcp-connection:{self.name}"
+            )
             try:
-                async with asyncio.timeout(timeout):
-                    if transport_type == 'stdio':
-                        return await self._connect_stdio()
-                    elif transport_type == 'sse':
-                        return await self._connect_sse()
-                    elif transport_type == 'streamable_http':
-                        return await self._connect_streamable_http()
-                    else:
-                        self.error = f"使用了不支持的传输类型: {transport_type}"
-                        logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-                        await self._cleanup_ai_process()
-                        self.init_attempted = True
-                        return False
+                return await asyncio.shield(ready)
+            except asyncio.CancelledError:
+                self._owner.cancel()
+                await asyncio.gather(self._owner, return_exceptions=True)
+                raise
 
-            except asyncio.TimeoutError:
-                self.error = f"连接超时（{timeout}秒）。可能是服务器未响应或配置不正确。"
-                logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-                # 尝试关闭可能已部分建立的连接
-                await self.cleanup()
+    async def _run_connection(self, ready: asyncio.Future) -> None:
+        """在同一个 task 中进入和退出 MCP/AnyIO 上下文。"""
+        try:
+            async with AsyncExitStack() as stack:
+                if self.config.get("disabled", False):
+                    raise ValueError("服务器已禁用")
+                try:
+                    async with asyncio.timeout(self.config.get("timeout", 10)):
+                        self._validate_transport()
+                        if self.is_ai_generated:
+                            if not await self._start_ai_process():
+                                raise RuntimeError(self.error)
+                            await asyncio.sleep(3)
+                        await self._open_session(stack)
+                except TimeoutError:
+                    self.error = f"连接超时（{self.config.get('timeout', 10)}秒）。可能是服务器未响应或配置不正确。"
+                    logger.error("服务器 '%s': %s", self.name, self.error)
+                    return
+                except Exception as exc:
+                    self.error = str(exc)
+                    logger.exception("服务器 '%s' 连接失败", self.name)
+                    return
                 self.init_attempted = True
-                return False
+                self._connected = True
+                ready.set_result(True)
+                await self._stop.wait()
+        except asyncio.CancelledError:
+            self.error = "连接已取消"
+            raise
+        except Exception as exc:
+            self.error = str(exc)
+            logger.exception("服务器 '%s' 连接失败", self.name)
+        finally:
+            self._connected = False
+            self.session = None
+            self.stdio = None
+            self.write = None
+            self.tools = []
+            try:
+                await self._cleanup_ai_process()
+            finally:
+                self.init_attempted = True
+                if not ready.done():
+                    ready.set_result(False)
 
-        except Exception as e:
-            self.error = f"连接时出错: {str(e)}"
-            logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-            logger.error(traceback.format_exc())
-            await self._cleanup_ai_process()
-            self.init_attempted = True
-            return False
+    def _validate_transport(self) -> None:
+        """在创建资源前校验传输配置。"""
+        transport = self.config.get("transportType", "stdio")
+        if transport == "stdio":
+            if not self.config.get("command"):
+                raise ValueError("stdio传输类型未指定命令")
+        elif transport in ("sse", "streamable_http"):
+            if not self.config.get("url"):
+                raise ValueError(f"{'SSE' if transport == 'sse' else transport}传输类型未指定URL")
+        else:
+            raise ValueError(f"使用了不支持的传输类型: {transport}")
+
+    async def _open_session(self, stack: AsyncExitStack) -> None:
+        """建立传输并完成会话握手和工具发现。"""
+        transport = self.config.get("transportType", "stdio")
+        if transport == "stdio":
+            env = os.environ.copy()
+            env.update(self.config.get("env") or {})
+            parameters = StdioServerParameters(
+                command=self.config["command"],
+                args=self.config.get("args", []),
+                env=env,
+            )
+            streams = await stack.enter_async_context(stdio_client(parameters))
+        elif transport == "sse":
+            streams = await stack.enter_async_context(sse_client(url=self.config["url"]))
+        else:
+            read, write, _ = await stack.enter_async_context(
+                streamablehttp_client(url=self.config["url"])
+            )
+            streams = (read, write)
+        self.stdio, self.write = streams
+        self.session = await stack.enter_async_context(ClientSession(*streams))
+        await self.session.initialize()
+        response = await self.session.list_tools()
+        self.tools = response.tools
+        logger.info("已连接到服务器 '%s'，工具: %s", self.name, [tool.name for tool in self.tools])
 
     async def _start_ai_process(self) -> bool:
-        """启动AI生成的MCP工具进程"""
-        try:
-            from agent_graph.app.infrastructure.storage.file_storage import FileManager
-            
-            # 获取脚本路径和虚拟环境Python路径
-            script_path = FileManager.get_mcp_tool_main_script(self.name)
-            python_path = FileManager.get_mcp_tool_venv_python(self.name)
-            
-            if not script_path or not python_path:
-                self.error = f"找不到AI生成工具 '{self.name}' 的脚本或虚拟环境"
-                logger.error(self.error)
-                return False
-            
-            # 启动进程
-            logger.info(f"启动AI生成的MCP工具: {python_path} {script_path}")
-            
-            # 创建日志文件
-            log_dir = settings.get_mcp_tool_dir(self.name)
-            stdout_file = log_dir / "mcp_stdout.log"
-            stderr_file = log_dir / "mcp_stderr.log"
-            
-            with open(stdout_file, 'w') as stdout, open(stderr_file, 'w') as stderr:
-                self.ai_process = subprocess.Popen(
-                    [str(python_path), str(script_path)],
-                    stdout=stdout,
-                    stderr=stderr,
-                    cwd=str(script_path.parent)
-                )
-            
-            logger.info(f"AI工具进程已启动，PID: {self.ai_process.pid}")
-            return True
-            
-        except Exception as e:
-            self.error = f"启动AI工具进程时出错: {str(e)}"
-            logger.error(self.error)
-            return False
-
-    async def _cleanup_ai_process(self):
-        """清理AI生成的MCP工具进程"""
-        if self.ai_process:
+        """在线程中启动 AI 工具进程并准备日志文件。"""
+        worker = asyncio.create_task(asyncify(self._spawn_ai_process)())
+        cancelled = False
+        # 线程不能被取消；必须等进程归还后，再由 owner 的 finally 回收。
+        while not worker.done():
             try:
-                # 优雅关闭
-                self.ai_process.terminate()
-                try:
-                    self.ai_process.wait(timeout=5)
-                    logger.info(f"AI工具进程 {self.ai_process.pid} 已正常关闭")
-                except subprocess.TimeoutExpired:
-                    # 强制关闭
-                    self.ai_process.kill()
-                    self.ai_process.wait()
-                    logger.info(f"AI工具进程 {self.ai_process.pid} 已强制关闭")
-            except Exception as e:
-                logger.error(f"关闭AI工具进程时出错: {str(e)}")
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                cancelled = True
+        result = worker.result()
+        if cancelled:
+            raise asyncio.CancelledError
+        return result
+
+    async def _cleanup_ai_process(self) -> None:
+        """等待 AI 子进程退出时让出事件循环。"""
+        if self.ai_process is not None:
+            await asyncify(self._stop_ai_process)()
+
+    def _spawn_ai_process(self) -> bool:
+        """创建工具进程并将输出写入其日志目录。"""
+        from agent_graph.app.infrastructure.storage.file_storage import FileManager
+
+        try:
+            script = FileManager.get_mcp_tool_main_script(self.name)
+            python = FileManager.get_mcp_tool_venv_python(self.name)
+            if not script or not python:
+                self.error = f"找不到AI生成工具 '{self.name}' 的脚本或虚拟环境"
+                return False
+            log_dir = settings.get_mcp_tool_dir(self.name)
+            with open(log_dir / "mcp_stdout.log", "w") as stdout, open(log_dir / "mcp_stderr.log", "w") as stderr:
+                self.ai_process = subprocess.Popen(
+                    [str(python), str(script)], stdout=stdout, stderr=stderr,
+                    cwd=str(script.parent),
+                )
+            logger.info("AI工具进程已启动，PID: %s", self.ai_process.pid)
+            return True
+        except Exception as exc:
+            self.error = f"启动AI工具进程时出错: {exc}"
+            logger.exception("启动AI工具进程失败")
+            return False
+
+    def _stop_ai_process(self) -> None:
+        """先请求进程退出，超时后终止并回收子进程。"""
+        process = self.ai_process
+        if process is None:
+            return
+        try:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        except Exception:
+            logger.exception("关闭AI工具进程失败")
+        finally:
+            self.ai_process = None
+
+    async def _wait_owner(self) -> None:
+        """等待资源所有者退出，清理调用的取消不会中断资源释放。"""
+        if self._owner is None:
+            return
+        waiter = asyncio.gather(self._owner, return_exceptions=True)
+        try:
+            await asyncio.shield(waiter)
+        except asyncio.CancelledError:
+            await asyncio.shield(waiter)
+            raise
+
+    async def cleanup(self) -> None:
+        """停止新工具调用，并等待所有者释放会话和进程。"""
+        async with self._lifecycle_lock:
+            self._connected = False
+            try:
+                async with self._call_lock:
+                    self._stop.set()
+                    await self._wait_owner()
+            except asyncio.CancelledError:
+                async with self._call_lock:
+                    self._stop.set()
+                    await self._wait_owner()
+                raise
             finally:
-                self.ai_process = None
-
-    async def _connect_stdio(self) -> bool:
-        """连接 stdio 类型的服务器"""
-        command = self.config.get('command')
-        args = self.config.get('args', [])
-
-        if not command:
-            self.error = "stdio传输类型未指定命令"
-            logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-            self.init_attempted = True
-            return False
-
-        try:
-            # 打印命令和参数，便于调试
-            logger.info(f"启动 stdio 服务器 '{self.name}' 使用命令: {command} {' '.join(args)}")
-
-            # 获取环境变量
-            env = os.environ.copy()
-            
-            # 如果配置中有环境变量设置，则合并到环境变量中
-            config_env = self.config.get('env', {})
-            if config_env:
-                logger.info(f"服务器 '{self.name}' 使用自定义环境变量: {list(config_env.keys())}")
-                env.update(config_env)
-
-            # 创建服务器参数
-            server_params = StdioServerParameters(
-                command=command,
-                args=args,
-                env=env
-            )
-
-            # 连接到服务器
-            stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
-            self.stdio, self.write = stdio_transport
-
-            # 创建会话并初始化
-            self.session = await self.exit_stack.enter_async_context(ClientSession(self.stdio, self.write))
-            await self.session.initialize()
-
-            # 获取工具列表
-            response = await self.session.list_tools()
-            self.tools = response.tools
-            logger.info(f"已连接到 stdio 服务器 '{self.name}' 提供的工具: {[tool.name for tool in self.tools]}")
-
-            # 检查自动批准的工具
-            auto_approve_tools = self.config.get('autoApprove', [])
-            if auto_approve_tools:
-                logger.info(f"为以下工具启用了自动批准: {auto_approve_tools}")
-
-            self.init_attempted = True
-            return True
-
-        except NotImplementedError:
-            # Windows特有问题
-            self.error = "在Windows环境下创建子进程失败，可能需要使用HTTP传输类型"
-            logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-            self.init_attempted = True
-            return False
-        except FileNotFoundError as e:
-            self.error = f"启动失败 - 找不到命令 '{command}'"
-            logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-            self.init_attempted = True
-            return False
-        except PermissionError as e:
-            self.error = f"启动失败 - 没有执行 '{command}' 的权限"
-            logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-            self.init_attempted = True
-            return False
-        except Exception as e:
-            self.error = f"stdio 连接过程中出错: {str(e)}"
-            logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-            logger.error(traceback.format_exc())
-            self.init_attempted = True
-            return False
-
-    async def _connect_sse(self) -> bool:
-        """连接 SSE 类型的服务器"""
-        url = self.config.get('url')
-
-        if not url:
-            self.error = "SSE传输类型未指定URL"
-            logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-            self.init_attempted = True
-            return False
-
-        try:
-            # 打印URL，便于调试
-            logger.info(f"连接到 SSE 服务器 '{self.name}' URL: {url}")
-
-            # 使用 exit_stack 管理 SSE 客户端上下文，获取 streams
-            streams = await self.exit_stack.enter_async_context(sse_client(url=url))
-            
-            # 创建会话并使用 exit_stack 管理
-            self.session = await self.exit_stack.enter_async_context(ClientSession(*streams))
-            await self.session.initialize()
-
-            # 获取工具列表
-            response = await self.session.list_tools()
-            self.tools = response.tools
-            logger.info(f"已连接到 SSE 服务器 '{self.name}' 提供的工具: {[tool.name for tool in self.tools]}")
-
-            # 检查自动批准的工具
-            auto_approve_tools = self.config.get('autoApprove', [])
-            if auto_approve_tools:
-                logger.info(f"为以下工具启用了自动批准: {auto_approve_tools}")
-
-            self.init_attempted = True
-            return True
-
-        except Exception as e:
-            self.error = f"SSE 连接过程中出错: {str(e)}"
-            logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-            logger.error(traceback.format_exc())
-            self.init_attempted = True
-            return False
-    
-    async def _connect_streamable_http(self) -> bool:
-        """连接 streamable_http 类型的服务器"""
-        url = self.config.get('url')
-
-        if not url:
-            self.error = "streamable_http传输类型未指定URL"
-            logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-            self.init_attempted = True
-            return False
-
-        try:
-            logger.info(f"连接到 streamable_http 服务器 '{self.name}' URL: {url}")
-            transport_context = await self.exit_stack.enter_async_context(streamablehttp_client(url=url))
-            if isinstance(transport_context, tuple) and len(transport_context) == 3:
-                read, write, get_session_id = transport_context
-                logger.info(f"streamablehttp_client 连接成功，获得读写流和会话ID函数")
-            else:
-                logger.warning(f"streamablehttp_client 返回格式异常: {type(transport_context)}")
-                read, write = transport_context, None
-                get_session_id = None
-            
-            self.session = await self.exit_stack.enter_async_context(ClientSession(read, write))
-            
-            logger.info(f"ClientSession 创建成功，开始初始化...")
-            
-            await self.session.initialize()
-            logger.info(f"会话初始化成功")
-            
-            if get_session_id and callable(get_session_id):
-                try:
-                    session_id = get_session_id()
-                    logger.info(f"获取到会话 ID: {session_id}")
-                except Exception as session_id_error:
-                    logger.warning(f"无法获取会话ID: {session_id_error}")
-
-            # 获取工具列表
-            response = await self.session.list_tools()
-            self.tools = response.tools
-            logger.info(f"已连接到 streamable_http 服务器 '{self.name}' 提供的工具: {[tool.name for tool in self.tools]}")
-
-            auto_approve_tools = self.config.get('autoApprove', [])
-            if auto_approve_tools:
-                logger.info(f"为以下工具启用了自动批准: {auto_approve_tools}")
-
-            self.init_attempted = True
-            return True
-
-        except Exception as e:
-            self.error = f"streamable_http 连接过程中出错: {str(e)}"
-            logger.error(f"错误: 服务器 '{self.name}' {self.error}")
-            logger.error(traceback.format_exc())
-            self.init_attempted = True
-            return False
-
-    async def cleanup(self):
-        """清理服务器连接"""
-        try:
-            # 先清空工具列表，避免断开连接后仍能获取工具
-            self.tools = []
-            
-            # 清理AI进程
-            if self.is_ai_generated:
-                await self._cleanup_ai_process()
-            
-            # 使用更安全的方式关闭连接
-            if self.exit_stack:
-                try:
-                    await self.exit_stack.aclose()
-                except Exception as e:
-                    logger.error(f"关闭exit_stack时出错: {str(e)}")
-                finally:
-                    # 确保重置所有状态
-                    self.exit_stack = AsyncExitStack()
-            
-            # 清除会话和IO引用
-            self.session = None
-            self.stdio = None
-            self.write = None
-            
-            logger.info(f"服务器 '{self.name}' 连接已成功清理")
-        except Exception as e:
-            logger.error(f"清理服务器 '{self.name}' 连接时出错: {str(e)}")
-            # 即使出错也要重置状态
-            self.session = None
-            self.stdio = None
-            self.write = None
-            self.tools = []
+                if self._owner is not None and self._owner.done():
+                    self._owner = None
 
     def is_connected(self) -> bool:
-        """检查服务器是否已连接"""
-        return self.session is not None
+        """仅在握手和工具发现完成后报告已连接。"""
+        return self._connected
 
     async def call_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """调用工具，返回工具结果"""
-        tool_call_timeout = self.config.get('timeout', 60)
-        logger.info(f"开始调用工具 '{tool_name}', 超时: {tool_call_timeout} 秒")
-
-        if not self.is_connected():
-            raise RuntimeError(f"服务器 '{self.name}' 未连接")
-
-        if not any(tool.name == tool_name for tool in self.tools):
-            raise ValueError(f"服务器 '{self.name}' 没有提供工具 '{tool_name}'")
-
-        try:
-            # 使用锁来保护会话调用，防止并发访问造成问题
-            async with self._call_lock:
-                try:
-                    async with asyncio.timeout(tool_call_timeout):
-                        result = await self.session.call_tool(tool_name, params)
-                    return {
-                        "tool_name": tool_name,
-                        "server_name": self.name,
-                        "content": result.content
-                    }
-                except asyncio.TimeoutError:
-                    error_message = f"Tool execution timed out after {tool_call_timeout} seconds. The operation was canceled."
-                    logger.error(f"调用工具 '{tool_name}' 超时 (超过 {tool_call_timeout} 秒)")
-                    return {
-                        "tool_name": tool_name,
-                        "server_name": self.name,
-                        "error": error_message,
-                        "content": f"ERROR: {error_message}"
-                    }
-        except Exception as e:
-            error_message = str(e)
-            logger.error(f"调用工具 '{tool_name}' 时出错: {error_message}")
-            traceback.print_exc()
+        """串行调用会话工具，保留调用超时的错误响应格式。"""
+        timeout = self.config.get("timeout", 60)
+        async with self._call_lock:
+            if not self.is_connected():
+                raise RuntimeError(f"服务器 '{self.name}' 未连接")
+            if not any(tool.name == tool_name for tool in self.tools):
+                raise ValueError(f"服务器 '{self.name}' 没有提供工具 '{tool_name}'")
+            try:
+                async with asyncio.timeout(timeout):
+                    result = await self.session.call_tool(tool_name, params)
+                return {"tool_name": tool_name, "server_name": self.name, "content": result.content}
+            except TimeoutError:
+                error = f"Tool execution timed out after {timeout} seconds. The operation was canceled."
+            except Exception as exc:
+                error = str(exc)
+                logger.exception("调用工具 '%s' 时出错", tool_name)
             return {
-                "tool_name": tool_name,
-                "server_name": self.name,
-                "error": error_message,
-                "content": f"ERROR: {error_message}"
+                "tool_name": tool_name, "server_name": self.name,
+                "error": error, "content": f"ERROR: {error}",
             }
 
 
@@ -489,14 +383,6 @@ async def connect_server(request: ServerConnectRequest):
     if not CONFIG or 'mcpServers' not in CONFIG or server_name not in CONFIG['mcpServers']:
         raise HTTPException(status_code=404, detail=f"找不到服务器配置: {server_name}")
 
-    # 如果服务器已连接，直接返回成功
-    if server_name in SERVERS and SERVERS[server_name].is_connected():
-        return {
-            "status": "connected",
-            "server": server_name,
-            "tools": [tool.name for tool in SERVERS[server_name].tools]
-        }
-
     # 直接在当前请求中执行连接，而不是使用后台任务
     logger.info(f"开始连接服务器: {server_name} (同步等待)")
 
@@ -559,144 +445,59 @@ async def get_tools():
 
 @app.post("/disconnect_server")
 async def disconnect_server(request: ServerConnectRequest):
-    """断开特定服务器的连接"""
-    server_name = request.server_name
-
-    if server_name not in SERVERS:
-        raise HTTPException(status_code=404, detail=f"找不到服务器: {server_name}")
-
-    # 如果服务器未连接，直接返回
-    if not SERVERS[server_name].is_connected():
-        return {
-            "status": "not_connected",
-            "server": server_name,
-            "message": "服务器未连接"
-        }
-
-    # 执行清理操作
-    logger.info(f"开始断开服务器连接: {server_name}")
-    try:
-        await SERVERS[server_name].cleanup()
-        
-        # 验证断开连接后的状态
-        if SERVERS[server_name].is_connected():
-            logger.warning(f"服务器 '{server_name}' 断开连接后仍显示为已连接状态")
-            # 强制重置状态
-            SERVERS[server_name].session = None
-            SERVERS[server_name].tools = []
-        
-        return {
-            "status": "disconnected",
-            "server": server_name,
-            "message": f"服务器 '{server_name}' 连接已断开"
-        }
-    except Exception as e:
-        logger.error(f"断开服务器 '{server_name}' 连接时出错: {str(e)}")
-        logger.error(traceback.format_exc())
-        return {
-            "status": "error",
-            "server": server_name,
-            "error": str(e),
-            "message": f"断开服务器连接时出错: {str(e)}"
-        }
+    """串行断开指定服务器，并等待连接资源释放。"""
+    name = request.server_name
+    async with _server_lock(name):
+        server = SERVERS.get(name)
+        if server is None:
+            raise HTTPException(status_code=404, detail=f"找不到服务器: {name}")
+        connected = server.is_connected()
+        await server.cleanup()
+        if not connected:
+            return {"status": "not_connected", "server": name, "message": "服务器未连接"}
+        return {"status": "disconnected", "server": name, "message": f"服务器 '{name}' 连接已断开"}
 
 
 async def process_config_update(new_config: Dict[str, Any]):
-    """处理配置更新"""
+    """按配置版本顺序更新注册表，同名连接变更互斥。"""
     global CONFIG
-
-    try:
-        if 'mcpServers' not in new_config:
-            logger.error("无效配置: 未找到 'mcpServers' 部分")
-            return False
-
-        CONFIG = new_config
-
-        current_servers = set(SERVERS.keys())
-        new_servers = set(new_config['mcpServers'].keys())
-
-        servers_to_add = new_servers - current_servers
-
-        servers_to_update = []
-        for server_name in current_servers.intersection(new_servers):
-            if SERVERS[server_name].config != new_config['mcpServers'][server_name]:
-                servers_to_update.append(server_name)
-
-        servers_to_remove = current_servers - new_servers
-
-        for server_name in servers_to_remove:
-            logger.info(f"删除服务器: {server_name}")
-            await SERVERS[server_name].cleanup()
-            del SERVERS[server_name]
-
-        for server_name in servers_to_update:
-            logger.info(f"更新服务器: {server_name}")
-            await SERVERS[server_name].cleanup()
-            del SERVERS[server_name]
-
-            server = MCPServer(server_name, new_config['mcpServers'][server_name])
-            SERVERS[server_name] = server
-
-        for server_name in servers_to_add:
-            logger.info(f"添加服务器: {server_name}")
-            server = MCPServer(server_name, new_config['mcpServers'][server_name])
-            SERVERS[server_name] = server
-
-        logger.info(f"配置更新完成，当前已有 {len(SERVERS)} 个服务器配置")
-        return True
-
-    except Exception as e:
-        logger.error(f"处理配置更新时出错: {str(e)}")
-        traceback.print_exc()
+    if 'mcpServers' not in new_config:
+        logger.error("无效配置: 未找到 'mcpServers' 部分")
         return False
+    async with _config_lock:
+        if _closing:
+            return False
+        CONFIG = new_config
+        names = set(SERVERS) | set(new_config['mcpServers'])
+        for name in names:
+            async with _server_lock(name):
+                config = new_config['mcpServers'].get(name)
+                server = SERVERS.get(name)
+                if server is not None and server.config == config:
+                    continue
+                if server is not None:
+                    await server.cleanup()
+                    SERVERS.pop(name, None)
+                if config is not None:
+                    SERVERS[name] = MCPServer(name, config)
+        return True
 
 
 async def connect_single_server(server_name: str) -> bool:
-    """连接单个服务器"""
-    global SERVERS, CONFIG
+    """在同名锁内读取最新配置并建立连接。"""
+    async with _server_lock(server_name):
+        config = CONFIG.get('mcpServers', {}).get(server_name)
+        if _closing or config is None:
+            return False
+        server = SERVERS.get(server_name)
+        if server is not None and server.config != config:
+            await server.cleanup()
+            server = None
+        if server is None:
+            server = MCPServer(server_name, config)
+            SERVERS[server_name] = server
+        return await server.connect()
 
-    logger.info(f"开始连接服务器: {server_name}")
-
-    if server_name not in CONFIG.get('mcpServers', {}):
-        logger.error(f"找不到服务器配置: {server_name}")
-        return False
-
-    # 显示服务器配置，便于调试
-    server_config = CONFIG['mcpServers'][server_name]
-    transport_type = server_config.get('transportType', 'stdio')
-    
-    if transport_type == 'stdio':
-        logger.info(
-            f"服务器 '{server_name}' 配置: command={server_config.get('command')}, args={server_config.get('args', [])}")
-    elif transport_type == 'sse':
-        logger.info(
-            f"服务器 '{server_name}' 配置: url={server_config.get('url')}")
-
-    # 如果服务器已存在但未连接，先清理它
-    if server_name in SERVERS:
-        if SERVERS[server_name].is_connected():
-            logger.info(f"服务器 '{server_name}' 已连接")
-            return True
-
-        logger.info(f"清理服务器 '{server_name}' 的现有连接")
-        await SERVERS[server_name].cleanup()
-        del SERVERS[server_name]
-
-    # 创建新服务器
-    logger.info(f"创建新的服务器实例: {server_name}")
-    server = MCPServer(server_name, server_config)
-    SERVERS[server_name] = server
-
-    # 连接服务器
-    logger.info(f"尝试连接服务器: {server_name}")
-    success = await server.connect()
-
-    if success:
-        logger.info(f"服务器 '{server_name}' 连接成功")
-        return True
-    else:
-        logger.error(f"服务器 '{server_name}' 连接失败: {server.error}")
-        return False
 
 @app.post("/shutdown")
 async def shutdown_client():
@@ -704,7 +505,9 @@ async def shutdown_client():
     logger.info("收到关闭请求")
 
     # 创建后台任务执行实际关闭
-    asyncio.create_task(_perform_client_shutdown())
+    global _shutdown_task
+    if _shutdown_task is None or _shutdown_task.done():
+        _shutdown_task = asyncio.create_task(_perform_client_shutdown())
 
     return {"status": "shutdown_initiated", "message": "客户端关闭过程已启动"}
 
@@ -714,14 +517,7 @@ async def _perform_client_shutdown():
     logger.info("开始执行客户端关闭流程")
 
     try:
-        # 1. 清理所有服务器连接
-        cleanup_tasks = []
-        for server_name, server in SERVERS.items():
-            logger.info(f"正在关闭服务器连接: {server_name}")
-            cleanup_tasks.append(server.cleanup())
-
-        if cleanup_tasks:
-            await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+        await _cleanup_servers()
 
         # 2. 等待一段时间确保资源释放
         await asyncio.sleep(1)

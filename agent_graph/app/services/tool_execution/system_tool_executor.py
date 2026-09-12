@@ -1,3 +1,4 @@
+from contextlib import aclosing
 """
 系统工具执行器
 
@@ -128,18 +129,19 @@ class SystemToolExecutor(BaseToolExecutor):
             logger.debug(f"调用流式系统工具 {tool_name}，参数: {arguments}")
 
             # 调用流式执行版本
-            async for item in handler(**arguments):
-                if isinstance(item, str):
-                    # SSE 事件字符串，直接转发
-                    yield item
-                else:
-                    # 最终结果，格式化为工具结果
-                    if isinstance(item, dict):
-                        content = json.dumps(item, ensure_ascii=False)
+            async with aclosing(handler(**arguments)) as owned_stream:
+                async for item in owned_stream:
+                    if isinstance(item, str):
+                        # SSE 事件字符串，直接转发
+                        yield item
                     else:
-                        content = str(item)
+                        # 最终结果，格式化为工具结果
+                        if isinstance(item, dict):
+                            content = json.dumps(item, ensure_ascii=False)
+                        else:
+                            content = str(item)
 
-                    yield self._format_result(tool_call_id, content)
+                        yield self._format_result(tool_call_id, content)
 
         except Exception as e:
             logger.error(f"流式系统工具 {tool_name} 执行失败: {str(e)}", exc_info=True)

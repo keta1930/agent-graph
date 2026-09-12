@@ -207,15 +207,7 @@ class ProjectService:
             # 1. 获取project下的所有conversations
             conversations = await mongodb_client.get_conversations_by_project(project_id, user_id)
 
-            # 2. 将所有conversations的project_id设置为None
-            for conv in conversations:
-                await mongodb_client.update_conversation_project(
-                    conversation_id=conv["_id"],
-                    project_id=None,
-                    user_id=user_id
-                )
-
-            # 3. 删除MinIO中的project文件
+            # 2. 删除MinIO中的project文件
             minio_success = await project_document_manager.delete_all_project_files(
                 user_id=user_id,
                 project_id=project_id
@@ -223,6 +215,19 @@ class ProjectService:
 
             if not minio_success:
                 logger.warning(f"删除Project文件失败: {project_id}")
+                return {"success": False, "message": "删除Project文件失败，请重试"}
+
+            # 3. 将所有conversations的project_id设置为None
+            for conv in conversations:
+                detached = await mongodb_client.update_conversation_project(
+                    conversation_id=conv["_id"],
+                    project_id=None,
+                    user_id=user_id
+                )
+
+                if not detached:
+                    return {"success": False, "message": "解除Conversation归属失败，请重试"}
+
 
             # 4. 删除MongoDB中的project文档
             success = await mongodb_client.delete_project(project_id)

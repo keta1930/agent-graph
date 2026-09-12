@@ -2,6 +2,7 @@
 项目文档服务
 提供项目文件管理的业务逻辑，供API路由使用
 """
+from agent_graph.app.services.conversation.document_write import write_document
 import logging
 from typing import Dict, Any, Optional, List
 from agent_graph.app.infrastructure.database.mongodb.client import mongodb_client
@@ -240,31 +241,29 @@ class ProjectDocumentService:
                 }
 
             # 创建文件到MinIO
-            minio_result = await project_document_manager.create_file(
-                user_id=user_id,
-                project_id=project_id,
-                filename=filename,
-                content=content
+            minio_result = await write_document(
+                lambda: project_document_manager.create_file(
+                    user_id=user_id,
+                    project_id=project_id,
+                    filename=filename,
+                    content=content
+                ),
+                lambda result: mongodb_client.project_repository.add_file_metadata(
+                    project_id=project_id,
+                    filename=filename,
+                    summary=summary,
+                    size=result["size"],
+                    version_id=result["version_id"],
+                    agent="user",
+                    comment=log
+                ),
+                lambda result: project_document_manager.delete_version(
+                    user_id=user_id, project_id=project_id, filename=filename,
+                    version_id=result['version_id'],
+                ),
             )
 
-            if not minio_result:
-                return {
-                    "success": False,
-                    "message": f"创建文件到存储失败：{filename}"
-                }
-
-            # 添加元数据到MongoDB
-            success = await mongodb_client.project_repository.add_file_metadata(
-                project_id=project_id,
-                filename=filename,
-                summary=summary,
-                size=minio_result["size"],
-                version_id=minio_result["version_id"],
-                agent="user",
-                comment=log
-            )
-
-            if success:
+            if minio_result:
                 from datetime import datetime
                 return {
                     "success": True,
@@ -330,31 +329,29 @@ class ProjectDocumentService:
                 }
 
             # 更新文件到MinIO
-            minio_result = await project_document_manager.update_file(
-                user_id=user_id,
-                project_id=project_id,
-                filename=filename,
-                content=content
+            minio_result = await write_document(
+                lambda: project_document_manager.update_file(
+                    user_id=user_id,
+                    project_id=project_id,
+                    filename=filename,
+                    content=content
+                ),
+                lambda result: mongodb_client.project_repository.update_file_metadata(
+                    project_id=project_id,
+                    filename=filename,
+                    summary=summary,
+                    size=result["size"],
+                    version_id=result["version_id"],
+                    agent="user",
+                    comment=log
+                ),
+                lambda result: project_document_manager.delete_version(
+                    user_id=user_id, project_id=project_id, filename=filename,
+                    version_id=result['version_id'],
+                ),
             )
 
-            if not minio_result:
-                return {
-                    "success": False,
-                    "message": f"保存文件到存储失败：{filename}"
-                }
-
-            # 更新元数据
-            success = await mongodb_client.project_repository.update_file_metadata(
-                project_id=project_id,
-                filename=filename,
-                summary=summary,
-                size=minio_result["size"],
-                version_id=minio_result["version_id"],
-                agent="user",
-                comment=log
-            )
-
-            if success:
+            if minio_result:
                 from datetime import datetime
                 return {
                     "success": True,
@@ -528,31 +525,29 @@ class ProjectDocumentService:
                 }
 
             # 写入到project
-            minio_result = await project_document_manager.create_file(
-                user_id=user_id,
-                project_id=project_id,
-                filename=filename,
-                content=content
+            minio_result = await write_document(
+                lambda: project_document_manager.create_file(
+                    user_id=user_id,
+                    project_id=project_id,
+                    filename=filename,
+                    content=content
+                ),
+                lambda result: mongodb_client.project_repository.add_file_metadata(
+                    project_id=project_id,
+                    filename=filename,
+                    summary=conv_file_meta.get("summary", ""),
+                    size=result["size"],
+                    version_id=result["version_id"],
+                    agent="user",
+                    comment=f"从conversation {conversation_id}推送"
+                ),
+                lambda result: project_document_manager.delete_version(
+                    user_id=user_id, project_id=project_id, filename=filename,
+                    version_id=result['version_id'],
+                ),
             )
 
-            if not minio_result:
-                return {
-                    "success": False,
-                    "message": f"推送文件到Project存储失败：{filename}"
-                }
-
-            # 添加元数据到project
-            success = await mongodb_client.project_repository.add_file_metadata(
-                project_id=project_id,
-                filename=filename,
-                summary=conv_file_meta.get("summary", ""),
-                size=minio_result["size"],
-                version_id=minio_result["version_id"],
-                agent="user",
-                comment=f"从conversation {conversation_id}推送"
-            )
-
-            if success:
+            if minio_result:
                 logger.info(
                     f"文件推送成功: {filename} (从conversation {conversation_id} -> project {project_id})"
                 )

@@ -129,16 +129,9 @@ async def login(request: UserLoginRequest):
             role=user["role"]
         )
 
-        # 将refresh token存储到数据库
-        try:
-            await mongodb_client.refresh_token_repository.create_refresh_token(
-                token_id=refresh_token_id,
-                user_id=user["user_id"],
-                expires_at=refresh_expires_at
-            )
-        except Exception as e:
-            logger.error(f"存储refresh token失败: {str(e)}")
-            # 存储失败不影响登录，只记录日志
+        await mongodb_client.refresh_token_repository.create_refresh_token(
+            token_id=refresh_token_id, user_id=user["user_id"], expires_at=refresh_expires_at,
+        )
 
         logger.info(f"用户登录成功: {request.user_id}")
 
@@ -247,7 +240,7 @@ async def refresh_token(request: RefreshTokenRequest):
     1. 验证Refresh Token的JWT签名和过期时间
     2. 检查数据库中该Token是否已被撤销
     3. 验证用户账号是否仍然激活
-    4. 生成新的Access Token（Refresh Token保持不变）
+    4. 原子消费旧Refresh Token并持久化新双Token
     """
     try:
         user_service = get_user_service()
@@ -285,24 +278,16 @@ async def refresh_token(request: RefreshTokenRequest):
                 detail="账号已被停用，请联系管理员"
             )
 
-        # 4. 生成新的双Token
+        consumed = await mongodb_client.refresh_token_repository.consume_refresh_token(token_id, user_id)
+        if not consumed:
+            raise HTTPException(status_code=401, detail="Refresh token已失效，请重新登录")
+
         new_access_token, new_refresh_token, new_token_id, new_expires_at = create_tokens(
-            user_id=user["user_id"],
-            role=user["role"]
+            user_id=user["user_id"], role=user["role"],
         )
-
-        # 5. 撤销旧的Refresh Token
-        await mongodb_client.refresh_token_repository.revoke_token(token_id)
-
-        # 6. 存储新的Refresh Token
-        try:
-            await mongodb_client.refresh_token_repository.create_refresh_token(
-                token_id=new_token_id,
-                user_id=user["user_id"],
-                expires_at=new_expires_at
-            )
-        except Exception as e:
-            logger.error(f"存储新refresh token失败: {str(e)}")
+        await mongodb_client.refresh_token_repository.create_refresh_token(
+            token_id=new_token_id, user_id=user["user_id"], expires_at=new_expires_at,
+        )
 
         logger.info(f"Token刷新成功: {user_id}")
 

@@ -116,6 +116,16 @@ class RefreshTokenRepository:
             logger.error(f"验证 token 有效性失败: {str(e)}")
             return False
 
+    async def consume_refresh_token(self, token_id: str, user_id: str) -> bool:
+        """原子消费未撤销且未过期的令牌，只允许一个刷新请求成功。"""
+        now = datetime.now()
+        result = await self.collection.update_one(
+            {"token_id": token_id, "user_id": user_id, "is_revoked": False,
+             "expires_at": {"$gt": now}},
+            {"$set": {"is_revoked": True, "revoked_at": now}},
+        )
+        return result.modified_count == 1
+
     async def revoke_token(self, token_id: str) -> bool:
         """
         撤销刷新令牌

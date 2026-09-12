@@ -1,4 +1,7 @@
 from unittest.mock import AsyncMock, Mock
+from types import SimpleNamespace
+
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -74,6 +77,8 @@ def test_lifespan_initializes_external_resources(monkeypatch):
     monkeypatch.setattr(main.mcp_service, "initialize", initialize_mcp)
     monkeypatch.setattr(main.mcp_service, "cleanup", cleanup_mcp)
     monkeypatch.setattr(main.mongodb_client, "disconnect", disconnect_mongodb)
+    monkeypatch.setattr(main.task_scheduler, "shutdown", AsyncMock())
+    monkeypatch.setattr(main.graph_service, "shutdown", AsyncMock(), raising=False)
 
     with TestClient(app) as lifespan_client:
         assert lifespan_client.get("/health").status_code == 200
@@ -91,3 +96,57 @@ def test_lifespan_initializes_external_resources(monkeypatch):
     initialize_mcp.assert_awaited_once_with()
     cleanup_mcp.assert_awaited_once_with()
     disconnect_mongodb.assert_awaited_once_with()
+
+
+@pytest.fixture
+def lifespan_resources(monkeypatch):
+    order = []
+    monkeypatch.setattr(type(main.settings), 'ensure_directories', lambda settings: None)
+    monkeypatch.setattr(main.minio_client, 'initialize', Mock())
+    monkeypatch.setattr(main.mongodb_client, 'initialize', AsyncMock())
+    monkeypatch.setattr(main, 'initialize_system', AsyncMock())
+    monkeypatch.setattr(main.FileManager, 'initialize', Mock())
+    monkeypatch.setattr(main.model_service, 'initialize', AsyncMock())
+    monkeypatch.setattr(main.graph_service, 'initialize', AsyncMock())
+    monkeypatch.setattr(main.mcp_service, 'initialize', AsyncMock())
+
+    def cleanup(name):
+        async def run():
+            order.append(name)
+        return AsyncMock(side_effect=run)
+
+    scheduler = SimpleNamespace(shutdown=cleanup('scheduler'))
+    monkeypatch.setattr(main, 'task_scheduler', scheduler, raising=False)
+    monkeypatch.setattr(main.graph_service, 'shutdown', cleanup('graph'), raising=False)
+    monkeypatch.setattr(main.mcp_service, 'cleanup', cleanup('mcp'))
+    monkeypatch.setattr(main.mongodb_client, 'disconnect', cleanup('mongo'))
+    return order
+
+
+def test_lifespan_stops_producers_before_dependent_connections(lifespan_resources):
+    with TestClient(app):
+        pass
+    assert lifespan_resources == ['scheduler', 'graph', 'mcp', 'mongo']
+
+
+@pytest.mark.parametrize('service', ['graph_service', 'mcp_service'])
+def test_lifespan_startup_failure_releases_all_resources(lifespan_resources, monkeypatch, service):
+    monkeypatch.setattr(getattr(main, service), 'initialize', AsyncMock(side_effect=RuntimeError('startup failed')))
+    with pytest.raises(RuntimeError, match='startup failed'):
+        with TestClient(app):
+            pass
+    assert lifespan_resources == ['scheduler', 'graph', 'mcp', 'mongo']
+
+
+@pytest.mark.parametrize('service, method', [('task_scheduler', 'shutdown'), ('graph_service', 'shutdown'), ('mcp_service', 'cleanup')])
+def test_lifespan_cleanup_failure_does_not_skip_other_resources(lifespan_resources, monkeypatch, service, method):
+    name = {'task_scheduler': 'scheduler', 'graph_service': 'graph', 'mcp_service': 'mcp'}[service]
+
+    async def fail():
+        lifespan_resources.append(name)
+        raise RuntimeError('cleanup failed')
+
+    monkeypatch.setattr(getattr(main, service), method, fail)
+    with TestClient(app):
+        pass
+    assert lifespan_resources == ['scheduler', 'graph', 'mcp', 'mongo']

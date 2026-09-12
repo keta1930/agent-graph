@@ -1,3 +1,4 @@
+from contextlib import aclosing
 """
 系统工具：search_memory_with_agent
 使用 Agent 任务搜索和整理记忆（上下文隔离）
@@ -145,7 +146,7 @@ async def handler(
 
         # 执行流式任务
         final_result = None
-        async for item in agent_stream_executor.run_agent_loop(
+        async with aclosing(agent_stream_executor.run_agent_loop(
             agent_name=agent_name,
             model_name=model_name,
             messages=messages,
@@ -155,13 +156,14 @@ async def handler(
             user_id=user_id,
             conversation_id=conversation_id,
             task_id=task_id
-        ):
-            if isinstance(item, str):
-                # SSE 字符串，转发
-                yield item
-            else:
-                # 最终结果字典
-                final_result = item
+        )) as owned_stream:
+            async for item in owned_stream:
+                if isinstance(item, str):
+                    # SSE 字符串，转发
+                    yield item
+                else:
+                    # 最终结果字典
+                    final_result = item
 
         if not final_result:
             error_msg = "Memory search failed, no result" if language == "en" else "记忆搜索失败，未收到结果"

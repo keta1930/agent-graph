@@ -1,7 +1,12 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from enum import Enum
+
+
+def local_datetime(value: datetime) -> datetime:
+    """将有时区的时间转换为服务器本地时间，兼容已有无时区记录。"""
+    return value.astimezone().replace(tzinfo=None) if value.tzinfo else value
 
 
 class ScheduleType(str, Enum):
@@ -20,12 +25,17 @@ class ScheduleConfig(BaseModel):
     execute_at: Optional[datetime] = Field(None, description="单次执行时间（本地时间）")
     cron_expression: Optional[str] = Field(None, description="周期执行Cron表达式")
 
+    @field_validator('execute_at')
+    @classmethod
+    def normalize_execute_at(cls, value: Optional[datetime]) -> Optional[datetime]:
+        return local_datetime(value) if value is not None else None
+
 
 class TaskCreate(BaseModel):
     task_name: str = Field(..., description="任务名称")
     graph_name: str = Field(..., description="要执行的图名称")
     input_text: str = Field(..., description="图的输入文本")
-    execution_count: int = Field(1, description="每次触发时并发执行的数量")
+    execution_count: int = Field(1, ge=1, description="每次触发时并发执行的数量")
     schedule_type: ScheduleType = Field(..., description="调度类型")
     schedule_config: ScheduleConfig = Field(..., description="调度配置")
     user_id: str = Field("default_user", description="用户ID")

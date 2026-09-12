@@ -1,4 +1,5 @@
 import logging
+from contextlib import aclosing
 import re
 import copy
 from datetime import datetime
@@ -28,7 +29,8 @@ class GraphService:
         self.processor = GraphProcessor(self.get_graph)
         self.conversation_manager = ConversationManager()
         self.executor = GraphExecutor(self.conversation_manager, mcp_service)
-        self.background_executor = BackgroundExecutor(self.conversation_manager, mcp_service)
+        self.background_executor = BackgroundExecutor(self.conversation_manager, mcp_service, self.executor)
+        self.executor.prepare_config = lambda config, user_id: self._preprocess_graph_prompts(config, user_id)
         self.active_conversations = self.conversation_manager.active_conversations
         self.mongodb_client = mongodb_client
         self._task_service = None
@@ -36,10 +38,15 @@ class GraphService:
 
     async def initialize(self) -> None:
         """初始化图服务"""
+        self.conversation_manager.runtime.closing = False
         FileManager.initialize()
 
         # 初始化任务管理组件
         await self._initialize_task_components()
+
+    async def shutdown(self):
+        """在关闭上游连接前等待图生产者完成清理。"""
+        await self.conversation_manager.runtime.shutdown()
 
     async def list_graphs(self, user_id: str = "default_user") -> List[str]:
         """
@@ -380,14 +387,15 @@ class GraphService:
             flattened_config = self.processor._calculate_node_levels(flattened_config)
 
             # 第三步：执行图
-            async for sse_data in self.executor.execute_graph_stream(
+            async with aclosing(self.executor.execute_graph_stream(
                     graph_name,
                     flattened_config,
                     input_text,
                     model_service,
                     user_id
-            ):
-                yield sse_data
+            )) as owned_stream:
+                async for sse_data in owned_stream:
+                    yield sse_data
 
         except Exception as e:
             logger.error(f"执行图流式处理时出错: {str(e)}")
@@ -412,25 +420,16 @@ class GraphService:
             set_user_language_context(user_language)
             logger.info(f"设置用户语言上下文: user_id={user_id}, language={user_language}")
 
-            # 如果是新的输入，需要重新预处理提示词
-            if input_text and not continue_from_checkpoint:
-                logger.info("继续会话需要预处理图配置中的提示词引用")
-                original_config = conversation.get("graph_config", {})
-                preprocessed_config = await self._preprocess_graph_prompts(original_config, user_id)
-
-                # 更新会话中的图配置为预处理后的版本
-                conversation["graph_config"] = preprocessed_config
-
-            async for sse_data in self.executor.continue_conversation_stream(
+            async with aclosing(self.executor.continue_conversation_stream(
                     conversation_id,
                     input_text,
                     model_service,
                     continue_from_checkpoint,
                     user_id=user_id
-            ):
-                yield sse_data
+            )) as owned_stream:
+                async for sse_data in owned_stream:
+                    yield sse_data
 
-            await self.conversation_manager.update_conversation_file(conversation_id)
 
         except HTTPException:
             raise

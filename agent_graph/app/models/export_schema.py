@@ -1,5 +1,12 @@
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+def validate_export_name(value: str) -> str:
+    """拒绝能改变目录结构的导出名称。"""
+    if not value or value in {'.', '..'} or any(char in value for char in ('/', '\\', '\x00')):
+        raise ValueError('名称必须是非空的单个路径段')
+    return value
+
 
 class ExportRequest(BaseModel):
     """导出请求模型"""
@@ -9,6 +16,11 @@ class ExportRequest(BaseModel):
     file_format: str = Field(default="jsonl", description="文件格式：jsonl/parquet/csv")
     data_format: str = Field(default="standard", description="数据格式：standard")
     user_id: str = Field(default="default_user", description="用户ID")
+
+    @field_validator('dataset_name', 'file_name')
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return validate_export_name(value)
 
 
 class FileInfo(BaseModel):

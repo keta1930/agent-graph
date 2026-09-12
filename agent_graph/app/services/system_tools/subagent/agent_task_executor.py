@@ -1,3 +1,4 @@
+from contextlib import aclosing
 """
 系统工具：agent_task_executor
 调用其他已注册的 Agent 执行特定任务（流式执行）
@@ -151,7 +152,7 @@ async def handler(
 
                 # 执行任务（流式）
                 task_result = None
-                async for item in execute_agent_task_stream(
+                async with aclosing(execute_agent_task_stream(
                     agent_stream_executor=agent_stream_executor,
                     agent_name=agent_name,
                     task_id=task_id,
@@ -160,13 +161,14 @@ async def handler(
                     user_id=user_id,
                     conversation_id=conversation_id,
                     tool_call_id=tool_call_id
-                ):
-                    if isinstance(item, str):
-                        # SSE 事件，转发
-                        yield item
-                    else:
-                        # 最终结果
-                        task_result = item
+                )) as owned_stream:
+                    async for item in owned_stream:
+                        if isinstance(item, str):
+                            # SSE 事件，转发
+                            yield item
+                        else:
+                            # 最终结果
+                            task_result = item
 
                 if task_result:
                     results.append(task_result)
@@ -276,7 +278,7 @@ async def execute_agent_task_stream(
 
         # 执行流式任务，收集所有数据
         final_result = None
-        async for item in agent_stream_executor.run_agent_loop(
+        async with aclosing(agent_stream_executor.run_agent_loop(
             agent_name=agent_name,
             model_name=model_name,
             messages=messages,
@@ -286,13 +288,14 @@ async def execute_agent_task_stream(
             user_id=user_id,
             conversation_id=conversation_id,
             task_id=task_id  # 传递 task_id，标识为 Sub Agent
-        ):
-            if isinstance(item, str):
-                # SSE 字符串，转发
-                yield item
-            else:
-                # 最终结果字典
-                final_result = item
+        )) as owned_stream:
+            async for item in owned_stream:
+                if isinstance(item, str):
+                    # SSE 字符串，转发
+                    yield item
+                else:
+                    # 最终结果字典
+                    final_result = item
 
         if not final_result:
             from agent_graph.app.services.system_tools.registry import get_current_language

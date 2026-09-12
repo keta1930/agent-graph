@@ -168,6 +168,21 @@ class ProjectDocumentManager:
             logger.error(f"读取文件失败 (用户: {user_id}, 项目: {project_id}, 文件: {filename}): {e}")
             return None
 
+    async def delete_version(self, user_id: str, project_id: str, filename: str, version_id: str) -> bool:
+        """只删除指定版本，保留其他历史和并发写入。"""
+        if not version_id:
+            raise ValueError("删除文件版本必须指定 version_id")
+        object_name = self._get_object_name(user_id, project_id, filename)
+        try:
+            await asyncio.to_thread(
+                minio_client.client.remove_object, bucket_name=minio_client.bucket_name,
+                object_name=object_name, version_id=version_id,
+            )
+            return True
+        except Exception:
+            logger.exception("删除文件版本失败: %s (%s)", object_name, version_id)
+            return False
+
     async def delete_file(self, user_id: str, project_id: str, filename: str) -> bool:
         """删除文件全部版本。"""
         return await asyncio.to_thread(self._delete_file_sync, user_id, project_id, filename)

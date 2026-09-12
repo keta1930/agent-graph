@@ -3,6 +3,7 @@
 
 负责用户注册、登录、权限管理等业务逻辑
 """
+import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -78,7 +79,7 @@ class UserService:
             raise ValueError(f"用户名已存在: {user_id}")
 
         # 4. 加密密码
-        password_hash = hash_password(password)
+        password_hash = await asyncio.to_thread(hash_password, password)
 
         # 5. 创建用户记录
         try:
@@ -151,7 +152,7 @@ class UserService:
 
             # 验证密码
             stored_hash = user.get("password_hash", "")
-            if not verify_password(password, stored_hash):
+            if not await asyncio.to_thread(verify_password, password, stored_hash):
                 logger.warning(f"密码错误: {user_id}")
                 return None
 

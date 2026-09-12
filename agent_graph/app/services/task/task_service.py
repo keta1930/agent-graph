@@ -5,6 +5,7 @@ from datetime import datetime
 from agent_graph.app.infrastructure.database.mongodb.repositories import TaskRepository
 from agent_graph.app.infrastructure.database.mongodb import mongodb_client
 from agent_graph.app.models.task_schema import TaskCreate
+from agent_graph.app.services.task.scheduling import build_task_trigger
 from agent_graph.app.services.graph.graph_service import graph_service
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,8 @@ class TaskService:
             graph_doc = await graph_service.get_graph(task_create.graph_name, user_id=task_data.get("user_id", user_id))
             if not graph_doc:
                 raise Exception(f"图 '{task_create.graph_name}' 不存在")
+
+            build_task_trigger(task_data)
 
             # 创建任务
             success = await self.task_repository.create_task(task_data)
@@ -188,7 +191,13 @@ class TaskService:
     async def execute_task(self, task: Dict[str, Any]) -> List[str]:
         """执行任务（并发执行多个图实例）"""
         try:
+            if not self.task_repository:
+                await self.initialize()
+            if not self.task_repository:
+                raise RuntimeError("任务管理器未初始化")
             execution_count = task.get("execution_count", 1)
+            if execution_count < 1:
+                raise ValueError("执行数量必须大于零")
             graph_name = task.get("graph_name")
             input_text = task.get("input_text")
             user_id = task.get("user_id", "default_user")
@@ -200,19 +209,13 @@ class TaskService:
 
             graph_config = graph_doc.get("config", {})
             # 并发执行多个图实例
-            tasks = []
-            for i in range(execution_count):
-                task_coroutine = graph_service.execute_graph_background(
-                    graph_name=graph_name,
-                    input_text=input_text,
-                    graph_config=graph_config,
-                    conversation_id=None,
-                    user_id=user_id
-                )
-                tasks.append(task_coroutine)
-
-            # 等待所有执行完成
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            results = []
+            for offset in range(0, execution_count, 8):
+                batch = [graph_service.execute_graph_background(
+                    graph_name=graph_name, input_text=input_text, graph_config=graph_config,
+                    conversation_id=None, user_id=user_id,
+                ) for _ in range(min(8, execution_count - offset))]
+                results.extend(await asyncio.gather(*batch, return_exceptions=True))
 
             # 收集成功的conversation_id
             conversation_ids = []

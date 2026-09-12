@@ -1,8 +1,8 @@
 import os
-import shutil
 import logging
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Depends
-from fastapi.responses import FileResponse
+from agent_graph.app.api.archive_response import TemporaryArchiveResponse
+from agent_graph.app.services.conversation.document_archive import remove_archive_directory
 from agent_graph.app.services.export.export_service import export_service
 from agent_graph.app.models.export_schema import (
     ExportRequest, ExportResponse, PreviewResponse,
@@ -50,6 +50,8 @@ async def export_conversations(request: ExportRequest, current_user: CurrentUser
 @router.get("/download/{dataset_name}")
 async def download_dataset(dataset_name: str, data_format: str, background_tasks: BackgroundTasks, current_user: CurrentUser = Depends(get_current_user)):
     """下载数据集"""
+    zip_path = None
+    transferred = False
     try:
         zip_path = await export_service.download_dataset(dataset_name, data_format, user_id=current_user.user_id)
 
@@ -59,16 +61,14 @@ async def download_dataset(dataset_name: str, data_format: str, background_tasks
                 detail="数据集不存在"
             )
 
-        # 在响应完成后清理临时目录
-        temp_dir = os.path.dirname(zip_path)
-        background_tasks.add_task(shutil.rmtree, temp_dir, ignore_errors=True)
-
-        return FileResponse(
+        response = TemporaryArchiveResponse(
             path=zip_path,
             filename=f"{dataset_name}.zip",
             media_type="application/zip",
             background=background_tasks
         )
+        transferred = True
+        return response
 
     except HTTPException:
         raise
@@ -78,6 +78,10 @@ async def download_dataset(dataset_name: str, data_format: str, background_tasks
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"下载失败: {str(e)}"
         )
+
+    finally:
+        if zip_path and not transferred:
+            await remove_archive_directory(os.path.dirname(zip_path))
 
 
 @router.get("/preview/{dataset_name}", response_model=PreviewResponse)

@@ -81,10 +81,18 @@ class AgentRunService:
                 )
 
         # 解析 JSON 字符串参数
-        mcp_servers_list = json.loads(mcp_servers) if mcp_servers else None
-        system_tools_list = json.loads(system_tools) if system_tools else None
+        mcp_servers_list = self._parse_tool_names(mcp_servers, "mcp_servers")
+        system_tools_list = self._parse_tool_names(system_tools, "system_tools")
 
         return agent_name, mcp_servers_list, system_tools_list
+
+    @staticmethod
+    def _parse_tool_names(value, field):
+        """保持 multipart JSON 参数格式并在产生副作用前校验形状。"""
+        parsed = json.loads(value) if value else None
+        if parsed is not None and (not isinstance(parsed, list) or any(not isinstance(name, str) for name in parsed)):
+            raise ValueError(f"{field} 必须是字符串数组")
+        return parsed
 
     async def ensure_conversation_exists(
         self,

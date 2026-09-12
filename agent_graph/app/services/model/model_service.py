@@ -1,3 +1,5 @@
+from anyio import move_on_after
+from contextlib import aclosing
 import logging
 from typing import Dict, List, Any, Optional, AsyncGenerator
 from openai import AsyncOpenAI
@@ -269,6 +271,7 @@ class ModelService:
         if not model_config:
             raise ValueError(f"找不到模型 '{model_name}' 的配置 (user: {user_id})")
 
+        stream = None
         try:
             # 准备基本调用参数
             base_params = {
@@ -288,12 +291,19 @@ class ModelService:
             stream = await client.chat.completions.create(**params, **extra_kwargs)
 
             # 使用流处理器处理流式响应
-            async for item in StreamHandler.stream_and_accumulate(stream, yield_chunks):
-                yield item
+            async with aclosing(StreamHandler.stream_and_accumulate(stream, yield_chunks)) as owned_stream:
+                async for item in owned_stream:
+                    yield item
 
         except Exception as e:
             logger.error(f"SSE流式调用模型 '{model_name}' 时出错: {str(e)}")
             raise
+        finally:
+            if stream is not None:
+                with move_on_after(3, shield=True) as cleanup:
+                    await stream.close()
+                if cleanup.cancel_called:
+                    logger.warning("模型流关闭超时: %s", model_name)
 
     # ========== 非SSE调用方法 ==========
 

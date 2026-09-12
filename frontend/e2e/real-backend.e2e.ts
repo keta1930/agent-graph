@@ -848,3 +848,95 @@ test('math delimiters: split SSE delimiters preserve reasoning and later fenced 
   expect(pageErrors).toEqual([]);
   writeFileSync(path.join(artifacts, 'delimiters-stream.json'), JSON.stringify({ reasoningRecovered: true, bodyRecovered: true, splitClosingFence: true, collapsePreserved: true, codeCopied: expectedCode, pageErrors }, null, 2));
 });
+
+test('backend quality: Graph upstream failure has one error and no success terminal', async () => {
+  const response = await api.post('/api/graphs/execute', { data: { graph_name: graphName, input_text: 'E2E_ERROR_GRAPH_QUALITY' } });
+  expect(response.status()).toBe(200);
+  const body = await response.text();
+  const events = body.split('\n\n').filter(frame => frame.startsWith('data: ') && frame.trim() !== 'data: [DONE]').map(frame => JSON.parse(frame.slice(6)) as { type?: string; error?: unknown; conversation_id?: string });
+  expect(events.filter(event => event.error)).toHaveLength(1);
+  expect(events.some(event => event.type === 'graph_complete')).toBe(false);
+  expect(body.match(/data: \[DONE\]/g)).toHaveLength(1);
+  const id = events.find(event => event.type === 'conversation_created')?.conversation_id;
+  expect(id).toBeTruthy();
+  const saved = await api.get('/api/conversations/' + id);
+  expect(saved.ok()).toBeTruthy();
+  const conversation = await saved.json() as { rounds: { node_name?: string }[]; final_result?: string };
+  expect(conversation.rounds.some(round => round.node_name === 'worker')).toBe(false);
+  expect(conversation.final_result).toBeFalsy();
+  writeFileSync(path.join(artifacts, 'graph-quality-failure.json'), JSON.stringify({ events, persistedRounds: conversation.rounds.length }, null, 2));
+});
+
+test('backend quality: Graph ZIP download and multipart import preserve nullable configuration', async () => {
+  const name = 'E2E Archive Quality';
+  const endpoint = '/api/graphs/' + encodeURIComponent(name);
+  const config = { name, description: 'ZIP roundtrip', nodes: [{ name: 'archive-worker', model_name: modelName, user_prompt: '{{start}}', input_nodes: ['start'], output_nodes: ['end'] }] };
+  expect((await api.post('/api/graphs', { data: config })).ok()).toBeTruthy();
+  try {
+    const original = await (await api.get(endpoint)).json() as { name: string; nodes: unknown[]; readme: string };
+    const download = await api.get(endpoint + '/export');
+    expect(download.ok()).toBeTruthy();
+    expect(download.headers()['content-type']).toContain('application/zip');
+    const zip = await download.body();
+    expect(zip.subarray(0, 2).toString()).toBe('PK');
+    writeFileSync(path.join(artifacts, 'graph-quality-roundtrip.zip'), zip);
+    expect((await api.delete(endpoint)).ok()).toBeTruthy();
+    const imported = await api.post('/api/graphs/import_package_from_file', { multipart: { file: { name: 'graph.zip', mimeType: 'application/zip', buffer: zip } } });
+    expect(imported.ok(), `ZIP import status ${imported.status()}`).toBeTruthy();
+    expect((await imported.json()).status).toBe('success');
+    const restored = await (await api.get(endpoint)).json() as typeof original;
+    expect(restored.name).toBe(original.name);
+    expect(restored.nodes).toEqual(original.nodes);
+    expect(restored.readme).toBe(original.readme);
+  } finally {
+    await api.delete(endpoint);
+  }
+});
+
+test('backend quality: a real refresh token has one winner under concurrent rotation', async () => {
+  const login = await api.post('/api/auth/login', { data: { user_id: privateConfig.user, password: privateConfig.password } });
+  expect(login.ok()).toBeTruthy();
+  const fresh = await login.json() as Auth;
+  const responses = await Promise.all([
+    api.post('/api/auth/refresh', { data: { refresh_token: fresh.refresh_token } }),
+    api.post('/api/auth/refresh', { data: { refresh_token: fresh.refresh_token } }),
+  ]);
+  const statuses = responses.map(response => response.status()).sort((a, b) => a - b);
+  expect(statuses).toEqual([200, 401]);
+  const replay = await api.post('/api/auth/refresh', { data: { refresh_token: fresh.refresh_token } });
+  expect(replay.status()).toBe(401);
+  writeFileSync(path.join(artifacts, 'refresh-quality-concurrency.json'), JSON.stringify({ statuses, replayStatus: replay.status() }, null, 2));
+});
+
+test('backend quality: conversation file saves update metadata and retain readable versions', async () => {
+  const run = await api.post('/api/agent/run', { multipart: { user_prompt: 'E2E_FILE_VERSION_OWNER', model_name: modelName, stream: 'false' } });
+  expect(run.ok()).toBeTruthy();
+  const id = (await run.json()).conversation_id as string;
+  expect(id).toBeTruthy();
+  const files = '/api/conversations/' + id + '/files';
+  const filename = 'history/note.txt';
+  const endpoint = files + '/' + encodeURIComponent(filename);
+  try {
+    const made = await api.post(files, { data: { filename, summary: 'First summary', content: 'E2E_CONVERSATION_V1', log: 'create' } });
+    expect(made.ok()).toBeTruthy();
+    const first = (await (await api.get(endpoint)).json()).file as { current_version_id: string; content: string };
+    expect(first.content).toBe('E2E_CONVERSATION_V1');
+    const saved = await api.put(endpoint, { data: { summary: 'Updated summary', content: 'E2E_CONVERSATION_V2', log: 'save second version' } });
+    expect(saved.ok(), `Conversation save status ${saved.status()}`).toBeTruthy();
+    const latest = (await (await api.get(endpoint)).json()).file as { current_version_id: string; content: string; summary: string; versions: unknown[] };
+    expect(latest.content).toBe('E2E_CONVERSATION_V2');
+    expect(latest.summary).toBe('Updated summary');
+    expect(latest.current_version_id).not.toBe(first.current_version_id);
+    expect(latest.versions).toHaveLength(2);
+    const historical = await api.get(endpoint + '/versions/' + encodeURIComponent(first.current_version_id));
+    expect(historical.ok()).toBeTruthy();
+    const previous = (await historical.json()).file as { content: string; is_current: boolean };
+    expect(previous.content).toBe('E2E_CONVERSATION_V1');
+    expect(previous.is_current).toBe(false);
+    const listed = await (await api.get(files)).json() as { files: string[] };
+    expect(listed.files).toContain(filename);
+    writeFileSync(path.join(artifacts, 'conversation-quality-versions.json'), JSON.stringify({ latest, previous, listed }, null, 2));
+  } finally {
+    await api.delete('/api/conversations/' + id);
+  }
+});

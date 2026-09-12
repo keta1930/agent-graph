@@ -21,6 +21,7 @@ from agent_graph.app.infrastructure.storage.object_storage.minio_client import (
 from agent_graph.app.services.graph.graph_service import graph_service
 from agent_graph.app.services.mcp.mcp_service import mcp_service
 from agent_graph.app.services.model.model_service import model_service
+from agent_graph.app.services.task.task_scheduler import task_scheduler
 
 
 settings = get_settings()
@@ -63,6 +64,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         raise
     finally:
         logger.info("Shutting down Agent-Graph application")
+
+        try:
+            await task_scheduler.shutdown()
+            logger.info("任务调度器已关闭")
+        except Exception:
+            logger.exception("关闭任务调度器时出错")
+
+        try:
+            await graph_service.shutdown()
+            logger.info("图执行任务已关闭")
+        except Exception:
+            logger.exception("关闭图执行任务时出错")
 
         try:
             await mcp_service.cleanup()

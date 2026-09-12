@@ -2,6 +2,7 @@
 文件处理服务
 职责：分类处理上传的文件（图片和文本文件）
 """
+from agent_graph.app.services.conversation.document_write import write_document
 import asyncio
 import logging
 import os
@@ -104,13 +105,14 @@ class FileHandler:
                         original_filename=file.filename
                     )
 
-                    asyncio.create_task(
-                        conversation_image_manager.upload_image(
+                    uploaded = await conversation_image_manager.upload_image(
                             minio_path=minio_path,
                             image_data=file_data,
                             mime_type=mime_type
-                        )
                     )
+                    if not uploaded:
+                        logger.warning("图片上传失败，跳过: %s", file.filename)
+                        continue
 
                     images_info.append({
                         "mime_type": mime_type,
@@ -189,28 +191,22 @@ class FileHandler:
         Raises:
             Exception: 上传失败时抛出异常
         """
-        result = await conversation_document_manager.create_file(
-            user_id=user_id,
-            conversation_id=conversation_id,
-            filename=filename,
-            content=content
+        result = await write_document(
+            lambda: conversation_document_manager.create_file(
+                user_id=user_id, conversation_id=conversation_id, filename=filename, content=content,
+            ),
+            lambda version: mongodb_client.conversation_repository.add_file_metadata(
+                conversation_id=conversation_id, filename=filename, summary=f"用户上传的 {filename}",
+                size=version['size'], version_id=version['version_id'], agent='user',
+                comment="多模态对话文件上传",
+            ),
+            lambda version: conversation_document_manager.delete_version(
+                user_id=user_id, conversation_id=conversation_id, filename=filename,
+                version_id=version['version_id'],
+            ),
         )
-
         if not result:
-            raise Exception(f"MinIO上传失败: {filename}")
-
-        success = await mongodb_client.conversation_repository.add_file_metadata(
-            conversation_id=conversation_id,
-            filename=filename,
-            summary=f"用户上传的 {filename}",
-            size=result["size"],
-            version_id=result["version_id"],
-            agent="user",
-            comment="多模态对话文件上传"
-        )
-
-        if not success:
-            raise Exception(f"MongoDB元数据保存失败: {filename}")
+            raise OSError(f"保存文件及元数据失败: {filename}")
 
         logger.info(f"✓ 文本文件上传成功: {filename}")
         return filename

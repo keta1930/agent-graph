@@ -408,6 +408,20 @@ class AgentStreamExecutor:
         logger.info(f"✓ 加载配置完成: agent={agent_name}, model={config['model_name']}")
         return config
 
+    @staticmethod
+    def _tag_task_event(item, task_id):
+        """为合法 JSON 事件添加任务归属，其他 SSE 帧原样传递。"""
+        if task_id is None or not item.startswith("data: ") or item.startswith("data: [DONE]"):
+            return item
+        try:
+            data = json.loads(item[6:].strip())
+        except ValueError:
+            return item
+        if not isinstance(data, dict):
+            return item
+        data["task_id"] = task_id
+        return f"data: {json.dumps(data)}\n\n"
+
     async def run_agent_loop(
             self,
             agent_name: str,
@@ -466,38 +480,22 @@ class AgentStreamExecutor:
 
                 # 调用模型进行流式生成
                 accumulated_result = None
-                async for item in model_service.stream_chat_with_tools(
+                async with aclosing(model_service.stream_chat_with_tools(
                         model_name=model_name,
                         messages=filtered_messages,
                         tools=tools,
                         yield_chunks=True,
                         user_id=user_id
-                ):
-                    if isinstance(item, str):
-                        # SSE chunk
-                        # 如果是 Sub Agent，添加 task_id 标识
-                        if is_sub_agent:
-                            # 解析 SSE 数据
-                            if item.startswith("data: ") and not item.startswith("data: [DONE]"):
-                                try:
-                                    data_str = item[6:].strip()
-                                    data = json.loads(data_str)
-                                    # 添加 task_id 标识
-                                    data["task_id"] = task_id
-                                    yield f"data: {json.dumps(data)}\n\n"
-                                except:
-                                    yield item
-                            else:
-                                yield item
+                )) as owned_stream:
+                    async for item in owned_stream:
+                        if isinstance(item, str):
+                            yield self._tag_task_event(item, task_id)
                         else:
-                            yield item
-                    else:
-                        # 累积结果
-                        accumulated_result = item
+                            # 累积结果
+                            accumulated_result = item
 
                 if not accumulated_result:
-                    logger.error(f"Agent {agent_name} - 第 {iteration} 轮未收到累积结果")
-                    break
+                    raise RuntimeError(f"Agent {agent_name} - 第 {iteration} 轮未收到模型结果")
 
                 # 提取累积的结果
                 accumulated_content = accumulated_result["accumulated_content"]
@@ -554,32 +552,19 @@ class AgentStreamExecutor:
                 if has_streaming_tool:
                     # 有流式工具调用，使用流式执行
                     tool_results = []
-                    async for item in self.tool_executor.execute_tools_batch_stream(
+                    async with aclosing(self.tool_executor.execute_tools_batch_stream(
                         tool_calls=current_tool_calls,
                         mcp_servers=mcp_servers,
                         user_id=user_id,
                         conversation_id=conversation_id,
                         agent_id=agent_name
-                    ):
-                        if isinstance(item, str):
-                            # SSE 事件，直接转发
-                            if is_sub_agent:
-                                # 如果当前也是 Sub Agent，添加 task_id
-                                if item.startswith("data: ") and not item.startswith("data: [DONE]"):
-                                    try:
-                                        data_str = item[6:].strip()
-                                        data = json.loads(data_str)
-                                        data["task_id"] = task_id
-                                        yield f"data: {json.dumps(data)}\n\n"
-                                    except:
-                                        yield item
-                                else:
-                                    yield item
+                    )) as owned_stream:
+                        async for item in owned_stream:
+                            if isinstance(item, str):
+                                yield self._tag_task_event(item, task_id)
                             else:
-                                yield item
-                        else:
-                            # 工具结果
-                            tool_results.append(item)
+                                # 工具结果
+                                tool_results.append(item)
                 else:
                     # 普通工具调用，使用非流式执行
                     tool_results = await self.tool_executor.execute_tools_batch(

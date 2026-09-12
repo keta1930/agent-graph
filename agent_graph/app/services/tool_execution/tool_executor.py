@@ -1,3 +1,4 @@
+from contextlib import aclosing
 """
 工具执行器协调器
 
@@ -166,8 +167,9 @@ class ToolExecutor:
                 if is_streaming_tool(tool_name):
                     # 流式系统工具
                     logger.info(f"使用 SystemToolExecutor 执行（流式）: {tool_name}")
-                    async for item in self.system_executor.execute_stream(tool_name, arguments, tool_id, **context):
-                        yield item
+                    async with aclosing(self.system_executor.execute_stream(tool_name, arguments, tool_id, **context)) as owned_stream:
+                        async for item in owned_stream:
+                            yield item
                 else:
                     # 普通系统工具
                     logger.info(f"使用 SystemToolExecutor 执行: {tool_name}")

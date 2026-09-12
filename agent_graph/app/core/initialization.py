@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime
 
+from asyncer import asyncify
 from pymongo.errors import DuplicateKeyError
 
 from agent_graph.app.auth.password import hash_password
@@ -24,20 +25,23 @@ async def initialize_super_admin() -> None:
         logger.info("Super admin '%s' already exists", admin_username)
         return
 
+    password_hash = await asyncify(hash_password)(settings.admin_password.get_secret_value())
     now = datetime.now()
-    await mongodb_client.users_collection.insert_one(
-        {
-            "user_id": admin_username,
-            "password_hash": hash_password(
-                settings.admin_password.get_secret_value()
-            ),
-            "role": "super_admin",
-            "is_active": True,
-            "created_at": now,
-            "updated_at": now,
-            "last_login_at": None,
-        }
-    )
+    try:
+        await mongodb_client.users_collection.insert_one(
+            {
+                "user_id": admin_username,
+                "password_hash": password_hash,
+                "role": "super_admin",
+                "is_active": True,
+                "created_at": now,
+                "updated_at": now,
+                "last_login_at": None,
+            }
+        )
+    except DuplicateKeyError:
+        logger.info("Super admin '%s' was created concurrently", admin_username)
+        return
     logger.info("Super admin '%s' created", admin_username)
 
 

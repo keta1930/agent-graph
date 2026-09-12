@@ -503,7 +503,7 @@ class GraphProcessor:
                             return False, f"节点 '{node['name']}' 使用了不存在的模型 '{model_name}'"
 
                 # 检查MCP服务器是否存在和连接
-                for server_name in node.get("mcp_servers", []):
+                for server_name in (node.get("mcp_servers") or []):
                     if server_name not in servers_status:
                         return False, f"节点 '{node['name']}' 使用了不存在的MCP服务器 '{server_name}'"
 

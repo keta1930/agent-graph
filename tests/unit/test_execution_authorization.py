@@ -13,6 +13,7 @@ from agent_graph.app.models.auth_schema import CurrentUser
 from agent_graph.app.models.graph_schema import GraphInput
 from agent_graph.app.services.agent.agent_run_service import AgentRunService, agent_run_service
 from agent_graph.app.services.graph.graph_service import graph_service
+from agent_graph.app.services.graph.execution_runtime import GraphExecutionRuntime
 
 
 @pytest.fixture
@@ -39,7 +40,9 @@ def execution(monkeypatch):
     monkeypatch.setattr(agent_routes.agent_stream_executor, "_load_effective_config", model)
     manager = SimpleNamespace(
         get_conversation=AsyncMock(return_value={"graph_config": {}, "rounds": [], "user_id": "untrusted-cache"}),
-        update_conversation_file=AsyncMock(),
+        update_conversation_file=AsyncMock(return_value=True),
+        runtime=GraphExecutionRuntime(),
+        release_conversation=Mock(),
         check_execution_resumption_point=AsyncMock(return_value={"action": "continue", "from_level": 0}),
         _get_final_output=AsyncMock(return_value="finished"),
     )
@@ -198,7 +201,9 @@ async def test_owned_graph_continues_with_authenticated_user(execution, monkeypa
         assert seen_users == ["owner"]
         if checkpoint:
             execution.manager.check_execution_resumption_point.assert_awaited_once_with("existing")
-    if checkpoint:
+    if background:
+        execution.record.assert_not_awaited()
+    elif checkpoint:
         execution.record.assert_not_awaited()
         execution.preprocess.assert_not_awaited()
     else:
@@ -298,3 +303,10 @@ async def test_graph_without_target_creates_new_conversation(execution, monkeypa
     assert create.await_args.args[-1] == "owner"
     execution.record.assert_awaited_once_with("new-graph", "hello")
     execution.repository.get_conversation.assert_not_awaited()
+
+
+@pytest.mark.parametrize('field,value', [('mcp_servers','"text"'),('system_tools','[1]'),('mcp_servers','{bad'),('max_iterations','-1'),('max_iterations','0'),('max_iterations','201')])
+def test_agent_invalid_execution_parameters_precede_side_effects(execution, field, value):
+    response=execution.client.post('/agent/run', data={'user_prompt':'hello','model_name':'valid',field:value})
+    assert response.status_code in (400,422)
+    assert_no_effects(execution)

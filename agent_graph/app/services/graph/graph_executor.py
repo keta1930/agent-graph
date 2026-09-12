@@ -1,357 +1,182 @@
 import logging
+import asyncio
+from contextlib import aclosing, asynccontextmanager
+from anyio import move_on_after
 from fastapi import HTTPException
 from agent_graph.app.services.conversation.execution_guard import get_execution_conversation
-from typing import Dict, Any, Optional, AsyncGenerator
 from agent_graph.app.utils.sse_helper import SSEHelper
-from agent_graph.app.services.graph.graph_helper import GraphHelper
-from agent_graph.app.services.graph.handoffs_manager import HandoffsManager
 from agent_graph.app.services.graph.message_creator import MessageCreator
 from agent_graph.app.services.tool_execution import ToolExecutor
 from agent_graph.app.services.graph.node_executor_core import NodeExecutorCore
 
 logger = logging.getLogger(__name__)
 
+
 class GraphExecutor:
-    """图执行服务 - 处理图和节点的实际执行流程"""
+    """流式与后台共用的顺序执行、恢复和 handoffs 驱动器。"""
 
     def __init__(self, conversation_manager, mcp_service):
+        self.prepare_config = None
         self.conversation_manager = conversation_manager
-        self.mcp_service = mcp_service
         self.message_creator = MessageCreator(conversation_manager)
         self.tool_executor = ToolExecutor(mcp_service)
-        self.node_executor_core = NodeExecutorCore(
-        conversation_manager, self.tool_executor, self.message_creator
-    )
+        self.node_executor_core = NodeExecutorCore(conversation_manager, self.tool_executor, self.message_creator)
 
-    async def execute_graph_stream(self,
-                                   graph_name: str,
-                                   flattened_config: Dict[str, Any],
-                                   input_text: str,
-                                   model_service=None,
-                                   user_id: str = "default_user") -> AsyncGenerator[str, None]:
-        """执行整个图并返回流式结果"""
-        try:
-            conversation_id = await self.conversation_manager.create_conversation_with_config(
-                graph_name, flattened_config, user_id
-            )
-
-            # 立即发送对话ID给前端
-            yield SSEHelper.send_json({
-                "type": "conversation_created",
-                "conversation_id": conversation_id
-            })
-
-            conversation = await self.conversation_manager.get_conversation(conversation_id)
-            conversation["graph_name"] = graph_name
-
-            # 发送start节点开始事件
-            yield SSEHelper.send_node_start("start", 0)
-
-            await self.message_creator.record_user_input(conversation_id, input_text)
-
-            # 发送start节点结束事件
-            yield SSEHelper.send_node_end("start")
-
-            async for sse_data in self._execute_graph_by_level_sequential_stream(conversation_id, model_service, user_id):
-                yield sse_data
-
-            conversation = await self.conversation_manager.get_conversation(conversation_id)
-            final_output = await self.conversation_manager._get_final_output(conversation)
-            execution_chain = conversation.get("execution_chain", [])
-
-            await self.conversation_manager.update_conversation_file(conversation_id)
-
-            yield SSEHelper.send_graph_complete(final_output, execution_chain)
-
-        except Exception as e:
-            logger.error(f"执行图流式处理时出错: {str(e)}")
-            yield SSEHelper.send_error(f"执行图时出错: {str(e)}")
-
-    async def continue_conversation_stream(self,
-                                           conversation_id: str,
-                                           input_text: str = None,
-                                           model_service=None,
-                                           continue_from_checkpoint: bool = False,
-                                           *, user_id: str) -> AsyncGenerator[str, None]:
-        """继续现有会话并返回流式结果"""
-        await get_execution_conversation(conversation_id, user_id, "graph")
-        try:
-            conversation = await self.conversation_manager.get_conversation(conversation_id)
+    @asynccontextmanager
+    async def execution(self, conversation_id, *, reserved=False):
+        """会话清理先于交还写入权，断开时尽力保存 checkpoint。"""
+        manager = self.conversation_manager
+        async with manager.runtime.execution(conversation_id, reserved=reserved):
+            conversation = await manager.get_conversation(conversation_id)
             if not conversation:
-                yield SSEHelper.send_error(f"找不到会话 '{conversation_id}'")
-                return
+                raise RuntimeError("会话不存在")
+            conversation.update(completed=False, execution_status="running", execution_error=None)
+            try:
+                yield
+            except (asyncio.CancelledError, GeneratorExit):
+                conversation.update(completed=False, execution_status="interrupted")
+                raise
+            except Exception as exc:
+                conversation.update(completed=False, execution_status="failed", execution_error=str(exc))
+                raise
+            finally:
+                with move_on_after(3, shield=True) as cleanup:
+                    saved = await manager.update_conversation_file(conversation_id)
+                    if saved:
+                        manager.release_conversation(conversation_id)
+                    else:
+                        logger.error("图执行退出时保存会话失败: %s", conversation_id)
+                if cleanup.cancel_called:
+                    logger.error("图执行退出清理超时: %s", conversation_id)
 
-            if continue_from_checkpoint or not input_text:
-                resumption_info = await self.conversation_manager.check_execution_resumption_point(conversation_id)
-                action = resumption_info.get("action")
-
-                if action == "error":
-                    yield SSEHelper.send_error(resumption_info.get("message"))
-                    return
-                elif action == "handoffs_continue":
-                    target_node = resumption_info.get("target_node")
-                    async for sse_data in self._continue_from_handoffs_selection_stream(conversation_id, target_node,
-                                                                                        model_service, user_id):
-                        yield sse_data
-                elif action == "handoffs_wait":
-                    current_node = resumption_info.get("current_node")
-                    async for sse_data in self._continue_waiting_handoffs_stream(conversation_id, current_node,
-                                                                                 model_service, user_id):
-                        yield sse_data
-                elif action == "continue":
-                    from_level = resumption_info.get("from_level")
-                    async for sse_data in self._continue_graph_by_level_sequential_stream(conversation_id, from_level,
-                                                                                          None, model_service, user_id):
-                        yield sse_data
-
-            else:
-                previous_rounds = [r for r in conversation.get("rounds", []) if r.get("node_name") == "start"]
-                conversation["rounds"] = previous_rounds
-                conversation["_current_round"] = len(previous_rounds)
-                conversation["execution_chain"] = []
-                conversation["handoffs_status"] = {}
-
-                if input_text:
-                    await self.message_creator.record_user_input(conversation_id, input_text)
-
-                async for sse_data in self._execute_graph_by_level_sequential_stream(conversation_id, model_service, user_id):
-                    yield sse_data
-
-            conversation = await self.conversation_manager.get_conversation(conversation_id)
-            final_output = await self.conversation_manager._get_final_output(conversation)
-            execution_chain = conversation.get("execution_chain", [])
-
-            await self.conversation_manager.update_conversation_file(conversation_id)
-
-            yield SSEHelper.send_graph_complete(final_output, execution_chain)
-
+    async def execute_graph_stream(self, graph_name, flattened_config, input_text, model_service=None, user_id="default_user"):
+        """创建会话并以既有 SSE 协议返回执行结果。"""
+        self.conversation_manager.runtime.ensure_open()
+        conversation_id = await self.conversation_manager.create_conversation_with_config(graph_name, flattened_config, user_id)
+        try:
+            async with self.execution(conversation_id):
+                yield SSEHelper.send_json({"type": "conversation_created", "conversation_id": conversation_id})
+                yield SSEHelper.send_node_start("start", 0)
+                await self.message_creator.record_user_input(conversation_id, input_text)
+                yield SSEHelper.send_node_end("start")
+                async with aclosing(self._execute_graph_by_level_sequential_stream(conversation_id, model_service, user_id)) as stream:
+                    async for chunk in stream:
+                        yield chunk
+                result = await self.finish(conversation_id)
+            yield SSEHelper.send_graph_complete(result["final_output"], result["execution_chain"])
         except HTTPException:
             raise
-        except Exception as e:
-            logger.error(f"继续会话流式处理时出错: {str(e)}")
-            yield SSEHelper.send_error(f"继续会话时出错: {str(e)}")
+        except Exception as exc:
+            logger.exception("执行图失败: %s", conversation_id)
+            yield SSEHelper.send_error(str(exc))
 
-    async def _execute_graph_by_level_sequential_stream(self, conversation_id: str, model_service=None,
-                                                        user_id: str = "default_user") -> AsyncGenerator[str, None]:
-        """基于层级的顺序执行方法"""
+    async def continue_conversation_stream(self, conversation_id, input_text=None, model_service=None, continue_from_checkpoint=False, *, user_id):
+        """授权后继续会话，成功终态仅在全部节点完成后发送。"""
+        await get_execution_conversation(conversation_id, user_id, "graph")
         try:
-            conversation = await self.conversation_manager.get_conversation(conversation_id)
-            graph_config = conversation["graph_config"]
+            async with self.execution(conversation_id):
+                async with aclosing(self.run_conversation(conversation_id, input_text, continue_from_checkpoint, user_id, yield_sse=True, model_service=model_service)) as stream:
+                    async for chunk in stream:
+                        yield chunk
+                result = await self.finish(conversation_id)
+            yield SSEHelper.send_graph_complete(result["final_output"], result["execution_chain"])
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("继续图会话失败: %s", conversation_id)
+            yield SSEHelper.send_error(str(exc))
 
-            max_level = GraphHelper.get_max_level(graph_config)
-            current_level = 0
-
-            while current_level <= max_level:
-                logger.info(f"开始执行层级 {current_level}")
-
-                nodes_to_execute = GraphHelper.get_nodes_at_level(graph_config, current_level)
-
-                for node in nodes_to_execute:
-                    async for sse_data in self._execute_node_stream(node, conversation_id, model_service, user_id):
-                        yield sse_data
-
-                    conversation = await self.conversation_manager.get_conversation(conversation_id)
-                    last_round = conversation["rounds"][-1] if conversation["rounds"] else {}
-
-                    if HandoffsManager.check_handoffs_in_round(last_round, node):
-                        selected_node_name = HandoffsManager.extract_handoffs_selection(last_round)
-                        if selected_node_name:
-                            selected_node = GraphHelper.find_node_by_name(graph_config, selected_node_name)
-                            if selected_node:
-                                logger.info(f"检测到handoffs选择: {selected_node_name}，跳转执行")
-                                async for sse_data in self._continue_from_handoffs_selection_stream(
-                                        conversation_id,
-                                        selected_node_name,
-                                        model_service,
-                                        user_id
-                                ):
-                                    yield sse_data
-                                return
-
-                current_level += 1
-
-        except Exception as e:
-            logger.error(f"执行图层级流式处理时出错: {str(e)}")
-            yield SSEHelper.send_error(f"执行图时出错: {str(e)}")
-
-    async def _continue_graph_by_level_sequential_stream(self,
-                                                         conversation_id: str,
-                                                         start_level: int,
-                                                         restart_node: Optional[str],
-                                                         model_service=None,
-                                                         user_id: str = "default_user") -> AsyncGenerator[str, None]:
-        """从指定层级继续顺序执行图"""
-        try:
-            conversation = await self.conversation_manager.get_conversation(conversation_id)
-            graph_config = conversation["graph_config"]
-
-            max_level = GraphHelper.get_max_level(graph_config)
-            current_level = start_level
-
-            if restart_node:
-                restart_node_obj = GraphHelper.find_node_by_name(graph_config, restart_node)
-                if restart_node_obj:
-                    current_level = restart_node_obj.get("level", 0)
-                    async for sse_data in self._execute_node_stream(restart_node_obj, conversation_id,
-                                                                    model_service, user_id):
-                        yield sse_data
-
-                    conversation = await self.conversation_manager.get_conversation(conversation_id)
-                    last_round = conversation["rounds"][-1] if conversation["rounds"] else {}
-
-                    if HandoffsManager.check_handoffs_in_round(last_round, restart_node_obj):
-                        selected_node_name = HandoffsManager.extract_handoffs_selection(last_round)
-                        if selected_node_name:
-                            async for sse_data in self._continue_graph_by_level_sequential_stream(
-                                    conversation_id,
-                                    current_level,
-                                    selected_node_name,
-                                    model_service,
-                                    user_id
-                            ):
-                                yield sse_data
-                            return
-
-                    current_level += 1
-
-            while current_level <= max_level:
-                nodes = GraphHelper.get_nodes_at_level(graph_config, current_level)
-
-                for node in nodes:
-                    async for sse_data in self._execute_node_stream(node, conversation_id, model_service, user_id):
-                        yield sse_data
-
-                    conversation = await self.conversation_manager.get_conversation(conversation_id)
-                    last_round = conversation["rounds"][-1] if conversation["rounds"] else {}
-
-                    if HandoffsManager.check_handoffs_in_round(last_round, node):
-                        selected_node_name = HandoffsManager.extract_handoffs_selection(last_round)
-                        if selected_node_name:
-                            async for sse_data in self._continue_graph_by_level_sequential_stream(
-                                    conversation_id,
-                                    current_level,
-                                    selected_node_name,
-                                    model_service,
-                                    user_id
-                            ):
-                                yield sse_data
-                            return
-
-                current_level += 1
-
-        except Exception as e:
-            logger.error(f"继续执行图层级流式处理时出错: {str(e)}")
-            yield SSEHelper.send_error(f"继续执行图时出错: {str(e)}")
-
-    async def _continue_from_handoffs_selection_stream(self,
-                                                       conversation_id: str,
-                                                       target_node: str,
-                                                       model_service=None,
-                                                       user_id: str = "default_user") -> AsyncGenerator[str, None]:
-        """从handoffs选择继续执行"""
-        try:
-            conversation = await self.conversation_manager.get_conversation(conversation_id)
-            graph_config = conversation["graph_config"]
-
-            target_node_obj = GraphHelper.find_node_by_name(graph_config, target_node)
-            if not target_node_obj:
-                yield SSEHelper.send_error(f"找不到handoffs目标节点: {target_node}")
-                return
-
-            logger.info(f"从handoffs选择继续执行: {target_node}")
-
-            current_level = target_node_obj.get("level", 0)
-            async for sse_data in self._continue_graph_by_level_sequential_stream(
-                    conversation_id,
-                    current_level,
-                    target_node,
-                    model_service,
-                    user_id
-            ):
-                yield sse_data
-
-        except Exception as e:
-            logger.error(f"从handoffs选择继续执行流式处理时出错: {str(e)}")
-            yield SSEHelper.send_error(f"从handoffs选择继续执行时出错: {str(e)}")
-
-    async def _continue_waiting_handoffs_stream(self,
-                                                conversation_id: str,
-                                                current_node: str,
-                                                model_service=None,
-                                                user_id: str = "default_user") -> AsyncGenerator[str, None]:
-        """继续等待handoffs的节点"""
-        try:
-            conversation = await self.conversation_manager.get_conversation(conversation_id)
-            graph_config = conversation["graph_config"]
-
-            current_node_obj = GraphHelper.find_node_by_name(graph_config, current_node)
-            if not current_node_obj:
-                yield SSEHelper.send_error(f"找不到当前节点: {current_node}")
-                return
-
-            logger.info(f"继续等待handoffs的节点: {current_node}")
-
-            async for sse_data in self._execute_node_stream(current_node_obj, conversation_id,
-                                                            model_service, user_id):
-                yield sse_data
-
-            conversation = await self.conversation_manager.get_conversation(conversation_id)
-            last_round = conversation["rounds"][-1] if conversation["rounds"] else {}
-
-            if HandoffsManager.check_handoffs_in_round(last_round, current_node_obj):
-                selected_node_name = HandoffsManager.extract_handoffs_selection(last_round)
-                if selected_node_name:
-                    logger.info(f"检测到新的handoffs选择: {selected_node_name}")
-                    async for sse_data in self._continue_from_handoffs_selection_stream(
-                            conversation_id,
-                            selected_node_name,
-                            model_service,
-                            user_id
-                    ):
-                        yield sse_data
-                else:
-                    logger.warning("handoffs节点完成但未找到选择的目标节点")
+    async def run_conversation(self, conversation_id, input_text, checkpoint, user_id, *, yield_sse, model_service=None):
+        """准备新一轮或恢复游标，两种传输方式消费同一驱动器。"""
+        conversation = await self.conversation_manager.get_conversation(conversation_id)
+        if not conversation:
+            raise RuntimeError("会话不存在")
+        if input_text and not checkpoint:
+            if self.prepare_config is not None:
+                conversation["graph_config"] = await self.prepare_config(conversation.get("graph_config", {}), user_id)
+            rounds = [r for r in conversation.get("rounds", []) if r.get("node_name") == "start"]
+            conversation.update(rounds=rounds, _current_round=len(rounds), execution_chain=[], handoffs_status={})
+            await self.message_creator.record_user_input(conversation_id, input_text)
+            plan = {"action": "start"}
+        else:
+            plan = await self.conversation_manager.check_execution_resumption_point(conversation_id)
+        action = plan["action"]
+        if action == "error":
+            raise RuntimeError(plan["message"])
+        if action == "start":
+            iterator = self._execute_graph_by_level_sequential_stream(conversation_id, model_service, user_id) if yield_sse else self.run_nodes(conversation_id, user_id, yield_sse=False)
+        elif action == "continue":
+            if yield_sse and not plan.get("next_node"):
+                iterator = self._continue_graph_by_level_sequential_stream(conversation_id, plan["from_level"], None, model_service, user_id)
             else:
-                current_level = current_node_obj.get("level", 0) + 1
-                max_level = GraphHelper.get_max_level(graph_config)
+                iterator = self.run_nodes(conversation_id, user_id, yield_sse=yield_sse, start_level=plan["from_level"], next_node=plan.get("next_node"))
+        elif action in {"handoffs_continue", "handoffs_wait"}:
+            target = plan.get("target_node") or plan.get("current_node")
+            iterator = self.run_nodes(conversation_id, user_id, yield_sse=yield_sse, restart_node=target)
+        else:
+            raise RuntimeError(f"未知恢复动作: {action}")
+        async with aclosing(iterator) as stream:
+            async for chunk in stream:
+                yield chunk
 
-                if current_level <= max_level:
-                    logger.info(f"handoffs节点完成，继续执行后续层级: {current_level}")
-                    async for sse_data in self._continue_graph_by_level_sequential_stream(
-                            conversation_id,
-                            current_level,
-                            None,
-                            model_service,
-                            user_id
-                    ):
-                        yield sse_data
+    async def run_nodes(self, conversation_id, user_id, *, yield_sse, start_level=0, next_node=None, restart_node=None):
+        """顺序推进层内节点，handoffs 使用游标跳转避免递归堆积。"""
+        conversation = await self.conversation_manager.get_conversation(conversation_id)
+        config = conversation["graph_config"]
+        nodes = sorted(config.get("nodes", []), key=lambda node: node.get("level", 0))
+        positions = {node["name"]: index for index, node in enumerate(nodes)}
+        cursor = next((i for i, node in enumerate(nodes) if node.get("level", 0) >= start_level), len(nodes))
+        jump = restart_node is not None
+        target = restart_node or next_node
+        if target:
+            if target not in positions:
+                raise RuntimeError(f"找不到目标节点: {target}")
+            cursor = positions[target]
+        while cursor < len(nodes):
+            node = nodes[cursor]
+            if yield_sse:
+                yield SSEHelper.send_node_start(node["name"], node.get("level", 0))
+            result = None
+            async with aclosing(self.node_executor_core.execute_node(node, conversation_id, yield_sse=yield_sse, user_id=user_id)) as stream:
+                async for item in stream:
+                    if isinstance(item, str):
+                        if yield_sse:
+                            yield item
+                    else:
+                        result = item
+            if result is None or not result.get("success"):
+                raise RuntimeError(f"节点 '{node['name']}' 未完成")
+            if yield_sse:
+                yield SSEHelper.send_node_end(node["name"])
+            selected = result.get("selected_node") if result.get("has_handoffs") else None
+            if selected:
+                if selected not in positions:
+                    raise RuntimeError(f"找不到handoffs目标节点: {selected}")
+                cursor = positions[selected]
+                jump = True
+            elif jump:
+                # handoffs 选中节点完成后沿用下一层语义，普通恢复保留同层后继。
+                level = node.get("level", 0)
+                cursor = next((i for i in range(cursor + 1, len(nodes)) if nodes[i].get("level", 0) > level), len(nodes))
+                jump = False
+            else:
+                cursor += 1
 
-        except Exception as e:
-            logger.error(f"继续等待handoffs流式处理时出错: {str(e)}")
-            yield SSEHelper.send_error(f"继续等待handoffs时出错: {str(e)}")
-
-    async def _execute_node_stream(self, node: Dict[str, Any], conversation_id: str, model_service, user_id: str = "default_user") -> AsyncGenerator[str, None]:
-        """执行单个节点（流式模式）"""
-        node_name = node["name"]
-        node_level = node.get("level", 0)
-
-        # 发送节点开始事件
-        yield SSEHelper.send_node_start(node_name, node_level)
-
-        # 执行节点并转发所有SSE消息
-        result = None
-        async for item in self.node_executor_core.execute_node(
-            node=node,
-            conversation_id=conversation_id,
-            yield_sse=True,  # 流式模式
-            user_id=user_id
-        ):
-            if isinstance(item, str):
-                # SSE消息，直接转发
+    async def _execute_graph_by_level_sequential_stream(self, conversation_id, model_service=None, user_id="default_user"):
+        async with aclosing(self.run_nodes(conversation_id, user_id, yield_sse=True)) as stream:
+            async for item in stream:
                 yield item
-            else:
-                # 最后一条是结果字典
-                result = item
-        
-        # 发送节点结束事件
-        yield SSEHelper.send_node_end(node_name)
+
+    async def _continue_graph_by_level_sequential_stream(self, conversation_id, start_level, restart_node, model_service=None, user_id="default_user"):
+        async with aclosing(self.run_nodes(conversation_id, user_id, yield_sse=True, start_level=start_level, restart_node=restart_node)) as stream:
+            async for item in stream:
+                yield item
+
+    async def finish(self, conversation_id):
+        """必要状态保存成功后才构造完成结果。"""
+        conversation = await self.conversation_manager.get_conversation(conversation_id)
+        output = await self.conversation_manager._get_final_output(conversation)
+        conversation.update(completed=True, execution_status="completed", execution_error=None)
+        if not await self.conversation_manager.update_conversation_file(conversation_id):
+            raise RuntimeError("保存图执行结果失败")
+        return {"final_output": output, "execution_chain": conversation.get("execution_chain", [])}

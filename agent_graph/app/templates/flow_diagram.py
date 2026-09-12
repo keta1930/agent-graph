@@ -156,7 +156,7 @@ class FlowDiagram:
         if mcp_config and mcp_config.get("mcpServers"):
             mcp_servers = set()
             for node in nodes:
-                for server in node.get("mcp_servers", []):
+                for server in (node.get("mcp_servers") or []):
                     mcp_servers.add(server)
 
             if mcp_servers:

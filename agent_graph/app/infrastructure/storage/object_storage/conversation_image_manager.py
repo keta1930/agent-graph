@@ -7,7 +7,7 @@ import asyncio
 import logging
 import os
 import base64
-from datetime import datetime
+from uuid import uuid4
 from typing import Optional, Dict, Any, Tuple
 from io import BytesIO
 from agent_graph.app.infrastructure.storage.object_storage.minio_client import minio_client
@@ -59,27 +59,10 @@ class ConversationImageManager:
         return True, None
 
     def _generate_unique_filename(self, original_filename: str) -> str:
-        """
-        生成唯一文件名（原始文件名 + 时间戳）
-
-        Args:
-            original_filename: 原始文件名
-
-        Returns:
-            str: 格式为 "filename_YYMMDDHHmm.ext" 的唯一文件名
-            例如: "graph_2504112213.png" 表示 2025年4月11日22点13分上传
-        """
-        # 分离文件名和扩展名
-        name_without_ext = os.path.splitext(original_filename)[0]
-        ext = os.path.splitext(original_filename)[1].lower()
-
-        # 生成时间戳：年月日时分（YYMMDDHHmm）
-        timestamp = datetime.now().strftime("%y%m%d%H%M")
-
-        # 组合：原始文件名_时间戳.扩展名
-        unique_name = f"{name_without_ext}_{timestamp}{ext}"
-
-        return unique_name
+        """生成保留扩展名的随机唯一文件名。"""
+        filename = original_filename.replace('\\', '/').rsplit('/', 1)[-1]
+        stem, extension = os.path.splitext(filename)
+        return f"{stem}_{uuid4().hex}{extension.lower()}"
 
     def generate_minio_path(
         self,
@@ -137,6 +120,10 @@ class ConversationImageManager:
             return False
 
     async def get_image(self, minio_path: str) -> Optional[bytes]:
+        """在线程内完成存储操作。"""
+        return await asyncio.to_thread(self._get_image_sync, minio_path)
+
+    def _get_image_sync(self, minio_path: str) -> Optional[bytes]:
         """
         从 MinIO 读取图片二进制数据
 
@@ -152,9 +139,13 @@ class ConversationImageManager:
                 object_name=minio_path
             )
 
-            image_data = response.read()
-            response.close()
-            response.release_conn()
+            try:
+                image_data = response.read()
+            finally:
+                try:
+                    response.close()
+                finally:
+                    response.release_conn()
 
             logger.debug(f"✓ 读取图片成功: {minio_path}")
             return image_data
@@ -187,6 +178,10 @@ class ConversationImageManager:
             return None
 
     async def delete_image(self, minio_path: str) -> bool:
+        """在线程内完成存储操作。"""
+        return await asyncio.to_thread(self._delete_image_sync, minio_path)
+
+    def _delete_image_sync(self, minio_path: str) -> bool:
         """
         删除图片
 
@@ -196,20 +191,13 @@ class ConversationImageManager:
         Returns:
             bool: 是否删除成功
         """
-        try:
-            minio_client.client.remove_object(
-                bucket_name=minio_client.bucket_name,
-                object_name=minio_path
-            )
-
-            logger.info(f"✓ 删除图片成功: {minio_path}")
-            return True
-
-        except Exception as e:
-            logger.error(f"删除图片失败 ({minio_path}): {e}")
-            return False
+        return self._delete_versions(minio_path, exact=True)
 
     async def delete_all_conversation_images(self, user_id: str, conversation_id: str) -> bool:
+        """在线程内完成存储操作。"""
+        return await asyncio.to_thread(self._delete_all_conversation_images_sync, user_id, conversation_id)
+
+    def _delete_all_conversation_images_sync(self, user_id: str, conversation_id: str) -> bool:
         """
         删除会话所有图片（删除会话时调用）
 
@@ -220,38 +208,33 @@ class ConversationImageManager:
         Returns:
             bool: 是否全部删除成功
         """
+        prefix = f"{self.STORAGE_PREFIX}/{user_id}/{conversation_id}/"
+        return self._delete_versions(prefix, exact=False)
+
+    def _delete_versions(self, prefix: str, *, exact: bool) -> bool:
+        """删除目标的全部版本，失败后继续尝试其他版本。"""
         try:
-            prefix = f"{self.STORAGE_PREFIX}/{user_id}/{conversation_id}/"
-
-            # 列出所有图片
             objects = minio_client.client.list_objects(
-                bucket_name=minio_client.bucket_name,
-                prefix=prefix,
-                recursive=True
+                bucket_name=minio_client.bucket_name, prefix=prefix,
+                recursive=True, include_version=True,
             )
-
             success = True
-            count = 0
             for obj in objects:
+                matches = obj.object_name == prefix if exact else obj.object_name.startswith(prefix)
+                if not matches:
+                    continue
                 try:
                     minio_client.client.remove_object(
                         bucket_name=minio_client.bucket_name,
-                        object_name=obj.object_name
+                        object_name=obj.object_name, version_id=obj.version_id,
                     )
-                    count += 1
-                except Exception as e:
-                    logger.error(f"删除图片失败 (用户: {user_id}, 会话: {conversation_id}): {obj.object_name}, 错误: {e}")
+                except Exception:
+                    logger.exception("删除图片版本失败: %s", obj.object_name)
                     success = False
-
-            if success:
-                logger.info(f"✓ 删除会话所有图片: {conversation_id} (用户: {user_id}), 删除数量: {count}")
-
             return success
-
-        except Exception as e:
-            logger.error(f"删除会话所有图片失败 (用户: {user_id}, 会话: {conversation_id}): {e}")
+        except Exception:
+            logger.exception("删除图片失败: %s", prefix)
             return False
 
 
-# 全局实例
 conversation_image_manager = ConversationImageManager()

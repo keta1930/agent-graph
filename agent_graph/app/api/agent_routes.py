@@ -1,6 +1,6 @@
 import json
 import logging
-from contextlib import aclosing
+from agent_graph.app.api.stream_response import ClosingStreamingResponse
 import tempfile
 import os
 from datetime import datetime
@@ -35,12 +35,8 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 agent_stream_executor = AgentStreamExecutor()
 
 
-class AgentStreamingResponse(StreamingResponse):
-    """在发送失败或客户端断开后显式关闭 Agent 流及其标题任务。"""
-
-    async def __call__(self, scope, receive, send):
-        async with aclosing(self.body_iterator):
-            await super().__call__(scope, receive, send)
+class AgentStreamingResponse(ClosingStreamingResponse):
+    """Agent SSE 响应关闭时释放执行流与标题任务。"""
 
 
 # ======= Agent 列表和查询 API接口 =======
@@ -392,7 +388,7 @@ async def agent_run(
     system_prompt: Optional[str] = Form(None),
     mcp_servers: Optional[str] = Form(None),
     system_tools: Optional[str] = Form(None),
-    max_iterations: Optional[int] = Form(None),
+    max_iterations: Optional[int] = Form(None, ge=1, le=200),
     files: Optional[List[UploadFile]] = File(None),
     current_user: CurrentUser = Depends(get_current_user)
 ):

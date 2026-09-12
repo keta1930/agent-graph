@@ -9,6 +9,7 @@
 | 操作系统 | Linux、macOS 或 Windows (需要 WSL2) |
 | Docker | 20.10+ 版本,包含 Docker Compose     |
 | Python | 3.11+ 版本                        |
+| Node.js | 22+ 版本及 npm（用于从源码构建前端） |
 | 内存 | 最低 4GB (推荐 8GB)                 |
 | 存储空间 | 至少 10GB 可用空间                    |
 
@@ -87,6 +88,15 @@ docker compose --env-file .env -f docker/docker-compose.yml up -d
 - MinIO 控制台: http://localhost:20043
 
 ### 4. 部署后端
+
+启动后端前，先从仓库根目录构建前端（需要 Node.js 22+ 和 npm）：
+
+```bash
+cd frontend
+npm ci
+npm run build
+cd ..
+```
 
 安装后端依赖:
 
@@ -181,7 +191,7 @@ npm run build
 
 这会在 `agent_graph/dist/` 中创建优化后的生产文件，后端将自动提供这些文件。
 
-**注意:** 仓库中已包含预构建的前端文件，只有在开发或自定义前端时才需要此步骤。
+**注意:** `agent_graph/dist/` 在本地生成，由 Git 忽略。克隆仓库后及前端代码变更后需要构建；运行 `uv build` 创建 wheel/sdist 发布包前，也应重新构建前端，确保包内包含最新资源。
 
 ## 生产环境部署
 

@@ -69,6 +69,15 @@ docker compose --env-file .env -f docker/docker-compose.yml up -d
 
 #### 2.3. Deploy Backend
 
+Build the frontend first (requires Node.js 22+ and npm):
+
+```bash
+cd frontend
+npm ci
+npm run build
+cd ..
+```
+
 **Using uv (Recommended):**
 ```bash
 uv sync
@@ -113,7 +122,7 @@ npm run dev  # Uses FRONTEND_PORT from the root .env
 npm run build  # Build production version
 ```
 
-**Note:** The repository includes pre-built frontend files. This step is only needed when developing or customizing the frontend.
+**Note:** `agent_graph/dist/` is generated locally and ignored by Git. Rebuild it after frontend changes and before running `uv build` to package a release. The Vite development server is optional.
 
 ## 3. Core Features
 

@@ -69,6 +69,15 @@ docker compose --env-file .env -f docker/docker-compose.yml up -d
 
 #### 2.3. 部署后端
 
+先构建前端（需要 Node.js 22+ 和 npm）：
+
+```bash
+cd frontend
+npm ci
+npm run build
+cd ..
+```
+
 **使用 uv (推荐):**
 ```bash
 uv sync
@@ -113,7 +122,7 @@ npm run dev  # 使用根目录 .env 中的 FRONTEND_PORT
 npm run build  # 构建生产版本
 ```
 
-**注意:** 仓库已包含预构建的前端文件，只有在开发或自定义前端时才需要此步骤。
+**注意:** `agent_graph/dist/` 在本地生成，由 Git 忽略。前端变更后及运行 `uv build` 打包发布前，需要重新构建。Vite 开发服务器为可选项。
 
 ## 3. 核心特性
 

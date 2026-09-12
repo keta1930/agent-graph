@@ -9,6 +9,7 @@ Before installation, ensure your system meets these requirements:
 | Operating System | Linux, macOS, or Windows (with WSL2) |
 | Docker | Version 20.10+ with Docker Compose |
 | Python | Version 3.11+ |
+| Node.js | Version 22+ with npm (for building the frontend from source) |
 | Memory | Minimum 4GB RAM (8GB recommended) |
 | Storage | At least 10GB free disk space |
 
@@ -87,6 +88,15 @@ With the example ports, verify services are running:
 - MinIO Console: http://localhost:20043
 
 ### 4. Deploy Backend
+
+Build the frontend from the repository root before starting the backend:
+
+```bash
+cd frontend
+npm ci
+npm run build
+cd ..
+```
 
 Install backend dependencies:
 
@@ -181,7 +191,7 @@ npm run build
 
 This creates optimized production files in `agent_graph/dist/` which will be served by the backend.
 
-**Note:** The repository includes pre-built frontend files, so this step is only needed if you're developing or customizing the frontend.
+**Note:** `agent_graph/dist/` is generated locally and ignored by Git. Build it after cloning and whenever frontend code changes. Before creating wheel/sdist releases with `uv build`, rebuild the frontend so the packages include the current assets.
 
 ## Production Deployment
 

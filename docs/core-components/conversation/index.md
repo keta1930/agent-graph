@@ -2,6 +2,10 @@
 
 Read agent responses and graph results, preview conversation files, and [share](share.md) or [export](export.md) conversations.
 
+## Images in Conversations
+
+Use a vision-capable model to discuss uploaded images. Only successfully stored images are attached to the conversation; retry an image that was not attached. Uploading another image with the same filename creates a separate stored image, so earlier messages keep their original image. See [Multimodal Support](../../roadmap/multimodal.md) for setup.
+
 ## Mathematical Formulas {#mathematical-formulas}
 
 Markdown supports inline and display LaTeX formulas in:

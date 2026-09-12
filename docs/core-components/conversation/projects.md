@@ -114,6 +114,10 @@ Move files from conversation to project for sharing:
 3. Click "Push to Project"
 4. File is copied to the project and becomes available to other conversations
 
+## Deleting a Project
+
+Deleting a project removes its shared files and detaches its conversations; the conversations themselves remain. If file removal fails, the project and its conversation associations remain so you can retry. A failed attempt may have already removed some files.
+
 ## Best Practices
 
 **Organize by topic or goal**

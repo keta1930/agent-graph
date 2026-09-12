@@ -185,6 +185,8 @@ This creates optimized production files in `agent_graph/dist/` which will be ser
 
 ## Production Deployment
 
+Run one API worker in one application instance when using the embedded task scheduler. Multiple workers or replicas can trigger the same tasks more than once; Graph conversation locks also apply only within one process. See [Backend Development](../development/backend.md) for execution and lifecycle boundaries.
+
 For production environments, consider these additional steps:
 
 1. **Security:**

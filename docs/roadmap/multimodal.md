@@ -27,6 +27,8 @@ Vision language model support is now available, giving Agents the ability to "se
 3. **Ask Questions**: The Agent will analyze the image and respond to your questions about its content
 4. **Multi-turn Dialogue**: Continue the conversation with follow-up questions about the image
 
+Only successfully stored images are attached. Reusing a filename does not replace an earlier message's image; see [Images in Conversations](../core-components/conversation/index.md#images-in-conversations).
+
 ## Future Plans
 
 After vision capabilities stabilize, we will gradually expand to image generation, audio interaction, video processing, and other modalities, bringing richer perception and creation capabilities to Agents.

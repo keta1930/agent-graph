@@ -24,17 +24,17 @@ Users can manage tasks through the interface:
 |--------|---------|
 | Active | Task is scheduled and will execute |
 | Paused | Task exists but won't execute until resumed |
-| Completed | Single task has been executed |
-| Error | Task encountered a problem (e.g., time has expired) |
+| Completed | A single task successfully started at least one Graph instance |
+| Error | Scheduling failed, the single execution time expired, or no instance could be started for a single task |
 
 
 ## Execution Details
 
-**Concurrent Instances:** Set `execution_count` to run multiple Graph instances on each trigger, each with its own `conversation_id`.
+**Concurrent Instances:** Set `execution_count` to a positive integer to start multiple Graph instances on each trigger, each with its own `conversation_id`.
 
 **Background Mode:** Tasks always execute in the background, view results in conversation history.
 
-**History Tracking:** Each trigger records timestamp and all `conversation_id`s
+**History Tracking:** Successful launches record their timestamp and `conversation_id`s. A completed single task does not mean every Graph finished successfully; open its conversations to check the results.
 
 ## How to Use
 
@@ -48,8 +48,10 @@ Users can manage tasks through the interface:
 
 ## Notes
 
-- All times use server local timezone
-- Failed tasks transition to `error` status and stop
+- Times without an offset use the server local timezone. API timestamps with `Z` or an offset are converted to server local time.
+- Single execution times must be in the future; recurring schedules use a valid five-field cron expression.
+- A single task that cannot start any instance becomes `error`. A failed trigger of a recurring task does not automatically cancel later triggers.
+- Tasks explicitly set to `error` or `completed` are no longer scheduled.
 - Input text is fixed at creation time and cannot be dynamically modified
 - Active tasks automatically reload on restart
 - To modify a task, delete and recreate it

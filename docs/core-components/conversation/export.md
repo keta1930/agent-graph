@@ -76,6 +76,8 @@ Access Export Manager from the conversation header button.
 - Use "Select All" for filtered results
 - Use "Deselect All" to clear
 
+Only your own conversations can be exported. If a selection includes another user's conversation, the entire export is rejected.
+
 ### Step 2: Configure Export
 
 Fill in the export form:
@@ -87,6 +89,8 @@ Fill in the export form:
 | **File format** | JSONL, CSV, or Parquet | `jsonl` |
 | **Data format** | Currently only "standard" | `standard` |
 
+Dataset and file names must be nonempty names without directory separators (`/` or `\`); `.` and `..` are not valid names. Chinese characters, spaces, and ordinary filename dots are supported.
+
 ### Step 3: Execute Export
 
 Click "Confirm Export" to create the dataset.
@@ -97,7 +101,7 @@ Click "Confirm Export" to create the dataset.
 Select → Configure → Export → Preview → Download
 ```
 
-After export completes, view preview data or download immediately.
+After export completes, view preview data or download immediately. Export succeeds only after both the data and metadata are stored. If export or download fails, retry after resolving the reported error; an incomplete download is not treated as a successful dataset ZIP.
 
 ## Managing Datasets
 
@@ -109,7 +113,7 @@ Switch to the "Datasets Management" tab to see all exports.
 |--------|-------------|
 | **Preview** | View first 20 records |
 | **Download** | Get ZIP file with data + metadata |
-| **Delete** | Remove dataset permanently |
+| **Delete** | Remove the dataset from your available exports |
 
 **Dataset list shows:**
 
@@ -190,7 +194,7 @@ Preview shows the first 20 records in JSON format.
 
 ## Features
 
-**User isolation:** Each user only sees their own datasets
+**User isolation:** Each user can export their own conversations and access their own datasets
 
 **Round 1 excluded:** Graph conversations skip first round (initialization)
 

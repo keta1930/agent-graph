@@ -15,6 +15,7 @@ This directory contains the documentation for the Agent-Graph platform.
   - prompt/: Prompt center documentation
   - conversation/: Conversation features documentation
   - team/: Multi-user and team documentation
+- **development/**: Backend engineering and runtime constraints
 - **roadmap/**: Future features and roadmap
 
 ## Building the Documentation

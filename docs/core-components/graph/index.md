@@ -124,6 +124,12 @@ This workflow demonstrates multi-level intelligent decision-making with Handoffs
 Handoffs enable Agents to intelligently choose execution paths based on actual conditions, rather than following fixed branching logic.
 
 
+## Import and Export
+
+Export a Graph as a ZIP package to transfer its configuration and associated resources. The package keeps `config.json`, `readme.md`, and the `attachment/` and `mcp/` resource layout. Configure required credentials in the destination environment.
+
+Imports validate configuration and resource references before saving the Graph. Invalid JSON or configuration is rejected, and an existing Graph name causes a conflict. If importing a component fails after other components were created, the error includes the imported components so you can inspect them before retrying. Existing shared resources are retained.
+
 ## When to Use Graphs
 
 | Use Case | Example |

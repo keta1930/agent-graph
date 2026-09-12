@@ -2,6 +2,10 @@
 
 查看 Agent 回复和 Graph 结果，预览会话文件，并[分享](share.zh.md)或[导出](export.zh.md)对话。
 
+## 会话图片 {#conversation-images}
+
+使用支持视觉的模型讨论上传的图片。只有保存成功的图片才会附加到会话，未附加的图片可重新上传。同名图片再次上传时会单独保存，较早消息中的图片保持原样。配置方法见[多模态支持](../../roadmap/multimodal.zh.md)。
+
 ## 数学公式 {#mathematical-formulas}
 
 以下 Markdown 展示区域支持行内和块级 LaTeX 数学公式：

@@ -79,6 +79,8 @@ Values intentionally left blank in `.env.example` are required. Generate `JWT_SE
 docker compose --env-file .env -f docker/docker-compose.yml up -d
 ```
 
+The default Compose project is `agent-graph`; its data volumes use the `agent-graph_` prefix. If an existing installation uses `agent_graph_services`, add `-p agent_graph_services` to Compose commands to keep using its existing containers and volumes. Changing the project name creates a separate set of volumes and does not migrate data.
+
 With the example ports, verify services are running:
 
 - MongoDB Express: http://localhost:20041

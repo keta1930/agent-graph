@@ -79,6 +79,8 @@ cp .env.example .env
 docker compose --env-file .env -f docker/docker-compose.yml up -d
 ```
 
+默认 Compose 项目名为 `agent-graph`，数据卷使用 `agent-graph_` 前缀。如果已有安装使用 `agent_graph_services`，请在 Compose 命令中加上 `-p agent_graph_services`，继续使用原有容器和数据卷。更改项目名会创建另一组卷，不会自动迁移数据。
+
 使用示例端口时，可通过以下地址验证服务：
 
 - MongoDB Express: http://localhost:20041

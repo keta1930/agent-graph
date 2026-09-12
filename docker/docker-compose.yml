@@ -1,4 +1,4 @@
-name: agent_graph_services
+name: agent-graph
 
 services:
   # MongoDB

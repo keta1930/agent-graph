@@ -134,6 +134,7 @@ class SSECollector:
 
                             # 处理工具调用
                             if delta.get("tool_calls"):
+                                # 同一工具调用可能跨多个流式 delta 到达，因此按 index 保留并拼接片段。
                                 for tool_call_delta in delta["tool_calls"]:
                                     index = tool_call_delta.get("index", 0)
 
@@ -310,6 +311,7 @@ class TrajectoryCollector:
 
                             # 处理工具调用
                             if delta.get("tool_calls"):
+                                # 同一工具调用可能跨多个流式 delta 到达，因此按 index 保留并拼接片段。
                                 for tool_call_delta in delta["tool_calls"]:
                                     index = tool_call_delta.get("index", 0)
 

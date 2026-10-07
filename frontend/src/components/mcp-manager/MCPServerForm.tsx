@@ -58,6 +58,11 @@ const MCPServerForm: React.FC<MCPServerFormProps> = ({
       const values = await form.validateFields();
       const { serverName, envText, ...serverConfig } = values;
 
+      // Headers are configured in JSON view, but must survive ordinary form edits.
+      if (serverConfig.transportType === 'streamable_http' && initialValues?.headers) {
+        serverConfig.headers = { ...initialValues.headers };
+      }
+
       // Convert string arrays
       if (typeof serverConfig.args === 'string') {
         serverConfig.args = serverConfig.args.split(',').map((arg: string) => arg.trim()).filter((arg: string) => arg);

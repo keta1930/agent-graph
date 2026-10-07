@@ -67,6 +67,41 @@
 }
 ```
 
+### Parallel Search（无需 API 密钥）
+
+[Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp)
+提供 `web_search`（网页搜索）和 `web_fetch`（读取 URL）工具。
+匿名端点可免费用于探索和轻量使用，但有速率限制。无需 Parallel API 密钥，
+也无需安装本地 MCP 服务器。模型推理由您的模型提供商单独配置和计费。
+
+在 MCP 管理器的 JSON 视图中，将 `parallel_search` 添加到现有的
+`mcpServers` 对象中，保留其他服务器配置：
+
+```json
+{
+  "mcpServers": {
+    "parallel_search": {
+      "autoApprove": [],
+      "disabled": false,
+      "timeout": 60,
+      "transportType": "streamable_http",
+      "url": "https://search.parallel.ai/mcp",
+      "headers": {
+        "User-Agent": "Agent-Graph/3.0.0"
+      }
+    }
+  }
+}
+```
+
+保存后点击**连接**，再打开**查看工具**。在 [MCP Inspector](inspector.md) 中，
+选择 `web_search`，在 `objective` 中输入 `Find the official Python asyncio documentation`。
+在 `search_queries` 中输入 `["Python asyncio official documentation"]`。
+结果包含来源 URL 和摘录。要读取来源内容，可选择 `web_fetch` 并在 `urls` 中输入
+`["https://docs.python.org/3/library/asyncio.html"]`。
+保持 `autoApprove` 为空以保留工具确认。Streaming HTTP 连接的 `headers` 映射
+可通过 JSON 编辑器配置；表单中没有对应字段。
+
 ## 表单添加
 
 从工作台侧边栏进入 **MCP 管理**。

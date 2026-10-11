@@ -302,7 +302,9 @@ class MCPServer:
 
         try:
             logger.info(f"连接到 streamable_http 服务器 '{self.name}' URL: {url}")
-            transport_context = await self.exit_stack.enter_async_context(streamablehttp_client(url=url))
+            transport_context = await self.exit_stack.enter_async_context(
+                streamablehttp_client(url=url, headers=self.config.get('headers'))
+            )
             if isinstance(transport_context, tuple) and len(transport_context) == 3:
                 read, write, get_session_id = transport_context
                 logger.info(f"streamablehttp_client 连接成功，获得读写流和会话ID函数")

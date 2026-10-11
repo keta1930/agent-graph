@@ -69,6 +69,44 @@ For advanced configuration, switch to JSON view in MCP Manager.
 }
 ```
 
+### Parallel Search (no API key)
+
+[Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp)
+provides `web_search` for web results and `web_fetch` for reading URLs. The
+anonymous endpoint is free for exploration and light use, with rate limits.
+No Parallel API key or local MCP server installation is required. Model inference
+is configured and billed separately by your model provider.
+
+In MCP Manager's JSON view, add the `parallel_search` entry to your existing
+`mcpServers` object, keeping your other servers:
+
+```json
+{
+  "mcpServers": {
+    "parallel_search": {
+      "autoApprove": [],
+      "disabled": false,
+      "timeout": 60,
+      "transportType": "streamable_http",
+      "url": "https://search.parallel.ai/mcp",
+      "headers": {
+        "User-Agent": "Agent-Graph/3.0.0"
+      }
+    }
+  }
+}
+```
+
+Save, click **Connect**, and open **View Tools**. In [MCP Inspector](inspector.md),
+select `web_search` and enter `Find the official Python asyncio documentation` in
+`objective`, and `["Python asyncio official documentation"]` in `search_queries`.
+The result includes source URLs and excerpts. To read a source,
+select `web_fetch` and enter `["https://docs.python.org/3/library/asyncio.html"]`
+in `urls`.
+Leave `autoApprove` empty to keep tool confirmation enabled. The `headers` map is
+supported for Streaming HTTP connections through the JSON editor; the form does
+not expose it.
+
 ## Add via Form
 
 Navigate to **MCP Manager** from the workspace sidebar.

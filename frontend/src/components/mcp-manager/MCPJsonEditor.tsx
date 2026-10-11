@@ -41,6 +41,12 @@ const cleanServerConfigForEditor = (config: any): any => {
     if (config.url && typeof config.url === 'string') {
       cleanConfig.url = config.url;
     }
+    if (transportType === 'streamable_http' && config.headers &&
+        typeof config.headers === 'object' && !Array.isArray(config.headers)) {
+      cleanConfig.headers = Object.fromEntries(
+        Object.entries(config.headers).filter(([, value]) => typeof value === 'string')
+      );
+    }
   }
 
   // 添加：保留 ai_generated 字段

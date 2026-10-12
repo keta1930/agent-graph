@@ -107,6 +107,51 @@ Leave `autoApprove` empty to keep tool confirmation enabled. The `headers` map i
 supported for Streaming HTTP connections through the JSON editor; the form does
 not expose it.
 
+### Sem: local code navigation
+
+[Sem](https://github.com/Ataraxy-Labs/sem) exposes entity search and related source
+from a Git checkout over STDIO. This optional configuration requires no Sem
+account or API key. Add only the `sem` entry to your existing `mcpServers` map:
+
+```json
+{
+  "mcpServers": {
+    "sem": {
+      "autoApprove": [],
+      "disabled": false,
+      "timeout": 60,
+      "transportType": "stdio",
+      "command": "npx",
+      "args": ["-y", "@ataraxy-labs/sem@0.27.0", "mcp"],
+      "env": {
+        "SEM_REPO": "/absolute/path/to/trusted/git/repository",
+        "SEM_NO_NETWORK": "1",
+        "SEM_NO_TELEMETRY": "1"
+      }
+    }
+  }
+}
+```
+
+Replace the repository path before connecting. Node.js with `npx` and the
+checkout must exist **on the MCP client/backend host**, not just in your browser's
+machine. For Docker, mount the checkout and use its path inside the container.
+Use supported macOS/Linux x64 or ARM64; the first launch downloads the pinned npm
+package and native binary.
+
+Save, **Connect**, then use [MCP Inspector](inspector.md) to call `sem_find`
+with `{"query":"parse_config"}`, replacing the symbol with one in your checkout.
+To request related source, call it with
+`{"query":"parse_config","mode":"context","token_budget":1200}`.
+An empty result can mean incomplete language/index coverage, not absence of code.
+
+Keep `autoApprove` empty: the full server is not read-only, and `sem_check` can
+execute repository commands. The path selects a checkout, not a security sandbox.
+Use trusted code and review each tool call. The environment flags disable Sem
+cloud sync and telemetry, not package downloads or your model provider's handling
+of tool results; model inference is separate. Remove the entry to disconnect
+the integration; downloaded packages and indexes remain on disk.
+
 ## Add via Form
 
 Navigate to **MCP Manager** from the workspace sidebar.

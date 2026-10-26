@@ -102,6 +102,39 @@
 保持 `autoApprove` 为空以保留工具确认。Streaming HTTP 连接的 `headers` 映射
 可通过 JSON 编辑器配置；表单中没有对应字段。
 
+### deed.page（发布网页，无需 API 密钥）
+
+[deed.page](https://deed.page/docs) 可以让智能体把 HTML 发布到公开的
+`https://<slug>.deed.page/` 地址。其托管 MCP 服务器提供 `publish_site`、
+`update_site`、`get_site` 和 `delete_site`，以及版本和自定义域名相关工具。
+无需账号、API 密钥或本地安装。发布的页面是公开的，请保持 `autoApprove` 为空，
+逐次确认发布。
+
+在 JSON 视图中，将 `deed_page` 添加到现有的 `mcpServers` 对象中：
+
+```json
+{
+  "mcpServers": {
+    "deed_page": {
+      "autoApprove": [],
+      "disabled": false,
+      "timeout": 60,
+      "transportType": "streamable_http",
+      "url": "https://deed.page/mcp",
+      "headers": {
+        "User-Agent": "Agent-Graph/3.0.0"
+      }
+    }
+  }
+}
+```
+
+保存后点击**连接**，再打开**查看工具**。在 [MCP Inspector](inspector.md) 中，
+选择 `publish_site`，在 `files` 中输入 `{"index.html": "<h1>Hello from Agent Graph</h1>"}`，
+在 `ttl_seconds` 中输入 `3600`（不填则页面永久保留）。结果包含页面 `url`，
+首次发布时还会返回所有者 `token`。在 `update_site` 或 `delete_site` 的 `token`
+字段中传入该 token 即可修改或删除页面，请妥善保管。
+
 ## 表单添加
 
 从工作台侧边栏进入 **MCP 管理**。

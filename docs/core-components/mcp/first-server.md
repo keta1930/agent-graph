@@ -107,6 +107,40 @@ Leave `autoApprove` empty to keep tool confirmation enabled. The `headers` map i
 supported for Streaming HTTP connections through the JSON editor; the form does
 not expose it.
 
+### deed.page (publish pages, no API key)
+
+[deed.page](https://deed.page/docs) lets an agent publish HTML to a public
+`https://<slug>.deed.page/` URL. Its hosted MCP server provides `publish_site`,
+`update_site`, `get_site` and `delete_site`, plus tools for versions and custom
+domains. No account, API key or local installation is needed. Published pages are
+public, so keep `autoApprove` empty and confirm each publish.
+
+Add the `deed_page` entry to your existing `mcpServers` object in the JSON view:
+
+```json
+{
+  "mcpServers": {
+    "deed_page": {
+      "autoApprove": [],
+      "disabled": false,
+      "timeout": 60,
+      "transportType": "streamable_http",
+      "url": "https://deed.page/mcp",
+      "headers": {
+        "User-Agent": "Agent-Graph/3.0.0"
+      }
+    }
+  }
+}
+```
+
+Save, click **Connect**, and open **View Tools**. In [MCP Inspector](inspector.md),
+select `publish_site`, enter `{"index.html": "<h1>Hello from Agent Graph</h1>"}` in
+`files` and `3600` in `ttl_seconds` (leave it out to keep the page). The result
+includes the page `url` and, on the first publish, an owner `token`. Pass that
+token in the `token` field of `update_site` or `delete_site` to change or remove
+the page, and store it privately.
+
 ## Add via Form
 
 Navigate to **MCP Manager** from the workspace sidebar.

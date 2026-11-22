@@ -102,6 +102,45 @@
 保持 `autoApprove` 为空以保留工具确认。Streaming HTTP 连接的 `headers` 映射
 可通过 JSON 编辑器配置；表单中没有对应字段。
 
+### Sem：本地代码导航
+
+[Sem](https://github.com/Ataraxy-Labs/sem) 通过 STDIO 从 Git 工作区提供代码实体搜索和相关源码。
+这是可选配置，不需要 Sem 账户或 API 密钥。仅将 `sem` 条目加入现有的 `mcpServers`，保留其他服务器：
+
+```json
+{
+  "mcpServers": {
+    "sem": {
+      "autoApprove": [],
+      "disabled": false,
+      "timeout": 60,
+      "transportType": "stdio",
+      "command": "npx",
+      "args": ["-y", "@ataraxy-labs/sem@0.27.0", "mcp"],
+      "env": {
+        "SEM_REPO": "/absolute/path/to/trusted/git/repository",
+        "SEM_NO_NETWORK": "1",
+        "SEM_NO_TELEMETRY": "1"
+      }
+    }
+  }
+}
+```
+
+连接前替换仓库路径。Node.js、`npx` 和仓库必须位于 **MCP 客户端/后端所在的主机**，
+而不只是浏览器所在的电脑。使用 Docker 时，挂载仓库并填写容器内的路径。
+支持 macOS/Linux x64 或 ARM64；首次启动会下载固定版本的 npm 包和原生二进制文件。
+
+保存并点击 **连接**，然后在 [MCP Inspector](inspector.md) 中调用 `sem_find`，
+参数为 `{"query":"parse_config"}`，将符号名替换为仓库中的实际名称。
+需要相关源码时使用 `{"query":"parse_config","mode":"context","token_budget":1200}`。
+空结果可能代表语言支持或索引覆盖不完整，并不能证明相关代码不存在。
+
+保持 `autoApprove` 为空，逐次确认工具调用。完整服务器并非只读，`sem_check` 可以执行仓库命令。
+仓库路径不是安全沙箱；只使用可信代码。上述环境变量关闭 Sem 云同步和遥测，
+但不会阻止包下载或模型提供商接收工具结果；模型推理单独配置和计费。
+删除该条目可停用集成，已下载的包和索引不会自动删除。
+
 ## 表单添加
 
 从工作台侧边栏进入 **MCP 管理**。

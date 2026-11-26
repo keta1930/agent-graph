@@ -89,3 +89,6 @@ test/
 !frontend/src/test/**
 experimental/
 spec/
+
+# ZCode agent workspace
+.zcode/

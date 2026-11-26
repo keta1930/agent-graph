@@ -15,7 +15,7 @@ interface MCPFields {
   url?: string;
   serverName: string;
   envText: string;
-  args: string;
+  args?: string;
   autoApprove: string;
 }
 
@@ -81,11 +81,15 @@ const MCPServerForm: React.FC<MCPServerFormProps> = ({
       const serverConfig: MCPServerConfig = {
         ...values,
         env,
-        args: args.split(',').map(value => value.trim()).filter(Boolean),
+        args: [],
         autoApprove: autoApprove.split(',').map(value => value.trim()).filter(Boolean),
       };
-      if (serverConfig.transportType === 'stdio') delete serverConfig.url;
-      else { delete serverConfig.command; serverConfig.args = []; }
+      if (serverConfig.transportType === 'stdio') {
+        serverConfig.args = (args ?? '').split(',').map(value => value.trim()).filter(Boolean);
+        delete serverConfig.url;
+      } else {
+        delete serverConfig.command;
+      }
       if (owner !== session.current) return;
       await onSubmit(serverName, serverConfig);
       if (owner === session.current) form.resetFields();

@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     agent_graph_dir: Path = Field(
         default_factory=lambda: Path.home() / ".agent_graph"
     )
+    api_docs_enabled: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -95,6 +95,9 @@ app = FastAPI(
     description="通过 MCP 与 Graph 构建 Agent 系统的工具",
     version=settings.app_version,
     lifespan=lifespan,
+    docs_url="/docs" if settings.api_docs_enabled else None,
+    redoc_url="/redoc" if settings.api_docs_enabled else None,
+    openapi_url="/openapi.json" if settings.api_docs_enabled else None,
 )
 
 app.add_middleware(

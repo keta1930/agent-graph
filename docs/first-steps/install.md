@@ -45,6 +45,7 @@ Edit the `.env` file with your configuration:
 | BACKEND_PROXY_HOST | Backend host used by the Vite development proxy | 127.0.0.1 |
 | FRONTEND_ALLOWED_HOSTS | Hosts accepted by the Vite development server | localhost,127.0.0.1 |
 | CORS_ORIGINS | Allowed browser origins (comma-separated) | http://localhost:20051 |
+| API_DOCS_ENABLED | Serve `/docs`, `/redoc` and `/openapi.json` (off by default; enable for local development) | true |
 | MONGODB_URL | MongoDB connection URL used by backend (credentials must match MONGO_ROOT_*) | mongodb://admin:strongpassword123@localhost:20040/ |
 | MONGODB_DB | Backend MongoDB database name | agent-graph |
 | MONGO_ROOT_USERNAME | MongoDB admin username (container init) | admin |

@@ -45,6 +45,7 @@ cp .env.example .env
 | BACKEND_PROXY_HOST | Vite 开发代理连接的后端主机 | 127.0.0.1 |
 | FRONTEND_ALLOWED_HOSTS | Vite 开发服务器允许的 Host | localhost,127.0.0.1 |
 | CORS_ORIGINS | 允许的浏览器 Origin（逗号分隔） | http://localhost:20051 |
+| API_DOCS_ENABLED | 是否提供 `/docs`、`/redoc`、`/openapi.json`（默认关闭；本地开发建议开启） | true |
 | MONGODB_URL | 后端使用的 MongoDB 连接 URL（凭据须与 MONGO_ROOT_* 一致） | mongodb://admin:strongpassword123@localhost:20040/ |
 | MONGODB_DB | 后端 MongoDB 数据库名称 | agent-graph |
 | MONGO_ROOT_USERNAME | MongoDB 管理员用户名（容器初始化） | admin |

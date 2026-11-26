@@ -26,10 +26,23 @@ const stringArray = (value: unknown): string[] => {
   if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) throw new Error('Expected a string array');
   return value;
 };
+
+const resolveTransportType = (config: Record<string, unknown>): MCPServerConfig['transportType'] => {
+  const alias = typeof config.type === 'string' ? config.type.toLowerCase().replace(/-/g, '_') : undefined;
+  let transport = config.transportType === undefined ? 'stdio' : config.transportType;
+  if (alias === 'stdio' || alias === 'sse' || alias === 'streamable_http') transport = alias;
+
+  if (transport === 'stdio' || transport === '') return config.url ? 'streamable_http' : 'stdio';
+  if (transport === 'sse') return 'sse';
+  if (typeof transport === 'string' && ['streamable_http', 'streamablehttp'].includes(transport.toLowerCase().replace(/-/g, '_'))) {
+    return 'streamable_http';
+  }
+  throw new Error('Invalid transport type');
+};
+
 const cleanServerConfigForEditor = (config: unknown): MCPServerConfig => {
   if (!isRecord(config)) throw new Error('Expected a server object');
-  const transportType = config.transportType ?? 'stdio';
-  if (transportType !== 'stdio' && transportType !== 'sse' && transportType !== 'streamable_http') throw new Error('Invalid transport type');
+  const transportType = resolveTransportType(config);
   if (config.disabled !== undefined && typeof config.disabled !== 'boolean') throw new Error('Invalid disabled value');
   if (config.timeout !== undefined && (typeof config.timeout !== 'number' || config.timeout <= 0)) throw new Error('Invalid timeout');
   
@@ -42,17 +55,14 @@ const cleanServerConfigForEditor = (config: unknown): MCPServerConfig => {
   };
 
   if (transportType === 'stdio') {
-    if (config.command && typeof config.command === 'string') {
-      cleanConfig.command = config.command;
-    }
+    if (typeof config.command !== 'string' || !config.command) throw new Error('Expected a stdio command');
+    cleanConfig.command = config.command;
     if (Array.isArray(config.args) && config.args.length > 0) {
       cleanConfig.args = stringArray(config.args);
     }
-  } else if (transportType === 'sse' || transportType === 'streamable_http') {
-    // 修复：为 sse 和 streamable_http 都保留 url 字段
-    if (config.url && typeof config.url === 'string') {
-      cleanConfig.url = config.url;
-    }
+  } else {
+    if (typeof config.url !== 'string' || !config.url) throw new Error('Expected a server URL');
+    cleanConfig.url = config.url;
   }
 
   // 添加：保留 ai_generated 字段
@@ -81,17 +91,13 @@ const cleanServerConfigForEditor = (config: unknown): MCPServerConfig => {
 };
 
 const cleanFullConfigForEditor = (config: unknown): MCPConfig => {
-  if (!isRecord(config) || !isRecord(config.mcpServers)) throw new Error('Expected mcpServers object');
-  const cleanedServers: Record<string, MCPServerConfig> = {};
-  
-  if (config && config.mcpServers && typeof config.mcpServers === 'object') {
-    for (const [serverName, server] of Object.entries(config.mcpServers)) {
-      cleanedServers[serverName] = cleanServerConfigForEditor(server);
-    }
+  if (!isRecord(config)) throw new Error('Expected a configuration object');
+  const servers = 'mcpServers' in config ? config.mcpServers : config;
+  if (!isRecord(servers) || (servers === config && Object.keys(servers).length === 0)) {
+    throw new Error('Expected a server map or mcpServers object');
   }
-
   return {
-    mcpServers: cleanedServers
+    mcpServers: Object.fromEntries(Object.entries(servers).map(([name, server]) => [name, cleanServerConfigForEditor(server)])),
   };
 };
 
@@ -117,6 +123,7 @@ const MCPJsonEditor: React.FC<MCPJsonEditorProps> = ({
       setJsonText(formatted);
       setError(null);
     } catch {
+      setJsonText(JSON.stringify(config, null, 2));
       setError(t('pages.mcpManager.jsonEditor.invalidConfig'));
     }
   }, [config, t]);
@@ -125,6 +132,7 @@ const MCPJsonEditor: React.FC<MCPJsonEditorProps> = ({
     const newValue = value || '';
     edited.current = true;
     setJsonText(newValue);
+    setError(null);
     setCopied(false);
   };
 
@@ -146,31 +154,7 @@ const MCPJsonEditor: React.FC<MCPJsonEditorProps> = ({
     setError(null);
     
     try {
-      const configToSave = JSON.parse(jsonText);
-
-      // Basic validation for MCP config structure
-      if (!configToSave || typeof configToSave !== 'object' || Array.isArray(configToSave)) {
-        setError(t('pages.mcpManager.jsonEditor.configMustBeObject'));
-        return;
-      }
-      
-      const typedConfig = configToSave as Record<string, unknown>;
-      
-      if (!typedConfig.mcpServers || typeof typedConfig.mcpServers !== 'object' || Array.isArray(typedConfig.mcpServers)) {
-        setError(t('pages.mcpManager.jsonEditor.missingMcpServers'));
-        return;
-      }
-
-      // Validate each server has required properties
-      const mcpServers = typedConfig.mcpServers as Record<string, Record<string, unknown>>;
-      for (const [serverName, server] of Object.entries(mcpServers)) {
-        if (!server.transportType) {
-          setError(t('pages.mcpManager.jsonEditor.missingTransportType', { name: serverName }));
-          return;
-        }
-      }
-
-      const cleanedConfig = cleanFullConfigForEditor(configToSave);
+      const cleanedConfig = cleanFullConfigForEditor(JSON.parse(jsonText));
       await onSave(cleanedConfig);
       edited.current = latestText.current !== jsonText;
 

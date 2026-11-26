@@ -122,7 +122,7 @@ docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
 curl http://127.0.0.1:8080/health
 ```
 
-见 [docker/README.md](docker/README.md)。
+见 [docker/README_CN.md](docker/README_CN.md)。
 
 ### 前端开发（可选）
 

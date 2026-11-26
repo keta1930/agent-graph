@@ -1,50 +1,60 @@
-# Docker 部署产物
+# Docker Deployment Artifacts
 
-本目录包含两套 Compose：
+This directory contains two Compose setups:
 
-| 文件 | 用途 |
+| File | Purpose |
 |---|---|
-| `docker-compose.yml` | 本地开发基础设施（MongoDB、MinIO、Mongo Express，端口绑定 127.0.0.1），配合根目录 `.env` |
-| `docker-compose.prod.yml` | 生产部署（应用 + 基础设施），配合 `Dockerfile` 与 `env.prod.example` |
+| `docker-compose.yml` | Local development infrastructure (MongoDB, MinIO, Mongo Express; ports bound to 127.0.0.1), used with the root `.env` |
+| `docker-compose.prod.yml` | Production deployment (app + infrastructure), used with `Dockerfile` and `env.prod.example` |
 
-## 生产镜像（`Dockerfile`）
+[中文版](README_CN.md)
 
-多阶段构建：
+## Production Image (`Dockerfile`)
 
-1. `frontend`：`npm ci && npm run build`，SPA 产物输出到 `agent_graph/dist`
-2. `build`：`uv build --wheel`，把后端代码与前端产物打进同一个 wheel（与
-   `tests/integration/test_deployment_artifacts.py` 验证的部署契约一致）
-3. `runtime`：`python:3.13-slim` + `uv sync --frozen`（依赖由 `uv.lock` 精确锁定）
-   + wheel 安装；非 root（uid 1000）、只读根文件系统、`HEALTHCHECK` 探测 `/health`
+Multi-stage build:
 
-运行时镜像保留 `uv`：应用会为 AI 生成的 MCP 工具执行 `uv init/venv/add`
-创建独立虚拟环境（见 `agent_graph/app/services/file_manager.py`）。
+1. `frontend`: `npm ci && npm run build`, SPA output written to `agent_graph/dist`
+2. `build`: `uv build --wheel`, packing the backend code and the frontend assets
+   into a single wheel (the same deployment contract verified by
+   `tests/integration/test_deployment_artifacts.py`)
+3. `runtime`: `python:3.13-slim` + `uv sync --frozen` (dependencies pinned by
+   `uv.lock`) + the wheel; runs as non-root (uid 1000) with a read-only root
+   filesystem and a `HEALTHCHECK` probing `/health`
 
-注意单实例约束：APScheduler 任务存储与图执行注册表均为进程内状态，
-禁止 `--workers > 1` 或多副本（`docs/development/backend.md`）。
+The runtime image keeps `uv`: the app runs `uv init/venv/add` to create isolated
+virtual environments for AI-generated MCP tools (see
+`agent_graph/app/services/file_manager.py`).
 
-## 生产部署
+Single-instance constraint: the APScheduler job store and the graph-execution
+registry are process-local state — `--workers > 1` and multiple replicas are not
+supported (`docs/development/backend.md`).
+
+## Production Deployment
 
 ```bash
-cp docker/env.prod.example .env   # 填入强随机凭据与你的域名
+cp docker/env.prod.example .env   # fill in strong random credentials and your domain
 docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
-curl http://127.0.0.1:${APP_PORT}/health   # 应返回 {"status":"healthy",...}
+curl http://127.0.0.1:${APP_PORT}/health   # should return {"status":"healthy",...}
 ```
 
-网络边界：
+Network boundaries:
 
-- `agent_graph_network`：项目内部网络，MongoDB/MinIO 不发布任何宿主机端口
-- 应用发布在 `127.0.0.1:${APP_PORT}`，对外服务由你自己的 TLS 反向代理提供
-- Mongo Express（`MONGO_EXPRESS_PORT`）与 MinIO 控制台（`MINIO_CONSOLE_PORT`）
-  仅绑定 127.0.0.1，通过 SSH 隧道访问
+- `agent_graph_network`: internal project network; MongoDB and MinIO publish no
+  host ports at all
+- The app is published on `127.0.0.1:${APP_PORT}`; public serving is provided by
+  your own TLS reverse proxy
+- Mongo Express (`MONGO_EXPRESS_PORT`) and the MinIO console
+  (`MINIO_CONSOLE_PORT`) bind to 127.0.0.1 only, reached through an SSH tunnel
 
-### 接入反向代理的注意事项
+### Reverse-Proxy Requirements
 
-- **TLS**：应用本身只跑明文 HTTP，证书由代理终止
-- **真实客户端 IP**：应用只信任 `FORWARDED_ALLOW_IPS` 所列地址发来的
-  `X-Forwarded-For`；请填代理回源地址，其余一律忽略
-- **SSE**：`/api/graphs/execute` 与 `/api/agent/run` 是长连接流式端点，
-  代理需关闭响应缓冲并把读/空闲超时放宽（建议 ≥ 1h）
-- **容器化代理**：若代理是 Docker 容器，用 override 文件把 `app` 接入代理所在的
-  网络即可（compose 的 override 只能追加、不能移除条目，因此 `127.0.0.1` 上的
-  发布端口会保留——它仅本机可达，也可在自行维护的副本中删掉）
+- **TLS**: the app serves plain HTTP only; certificates are terminated at the proxy
+- **Real client IP**: the app trusts `X-Forwarded-For` only from the addresses
+  listed in `FORWARDED_ALLOW_IPS` — set it to your proxy's upstream address
+- **SSE**: `/api/graphs/execute` and `/api/agent/run` are long-lived streaming
+  endpoints; disable response buffering at the proxy and raise read/idle timeouts
+  (1h or more is recommended)
+- **Containerized proxy**: if the proxy is a Docker container, use an override
+  file to attach `app` to the proxy's network (Compose overrides can only append,
+  never remove entries, so the `127.0.0.1` published port stays — it is reachable
+  from localhost only, and can be dropped in your own copy)

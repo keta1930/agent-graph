@@ -1,0 +1,27 @@
+# 构建上下文只保留镜像构建所需内容；.env 含密钥，绝不允许进入镜像。
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.venv
+.file
+.zcode
+.zcode.*
+logs
+dist
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+**/.pytest_cache
+.coverage
+htmlcov
+tests
+docs
+frontend/node_modules
+frontend/coverage
+agent_graph/dist
+mkdocs.yml
+CLAUDE.md
+AGENTS.md

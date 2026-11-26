@@ -111,6 +111,19 @@ nohup uv run --env-file .env fastapi run > app.log 2>&1 &
 - API 文档: http://localhost:20050/docs
 - 健康检查: http://localhost:20050/health
 
+#### 2.5. 生产部署（可选）
+
+面向服务器场景，仓库提供容器化的生产部署方案，应用与 MongoDB、MinIO 作为同一
+Compose 项目运行：
+
+```bash
+cp docker/env.prod.example .env    # 填入强随机凭据与你的域名
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
+curl http://127.0.0.1:8080/health
+```
+
+见 [docker/README.md](docker/README.md)。
+
 ### 前端开发（可选）
 
 如需修改前端代码:

@@ -111,6 +111,19 @@ Open the address configured by `PUBLIC_API_BASE_URL` (default: **http://localhos
 - API Documentation: http://localhost:20050/docs
 - Health Check: http://localhost:20050/health
 
+#### 2.5. Production Deployment (Optional)
+
+For servers, the repository ships a containerized production setup that runs the
+app together with MongoDB and MinIO as a single Compose project:
+
+```bash
+cp docker/env.prod.example .env    # fill in strong random credentials and your domain
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
+curl http://127.0.0.1:8080/health
+```
+
+See [docker/README.md](docker/README.md).
+
 ### Frontend Development (Optional)
 
 If you need to modify frontend code:

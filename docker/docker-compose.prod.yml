@@ -1,0 +1,158 @@
+# Agent-Graph 生产部署。
+#
+# 与 docker/docker-compose.yml（本地开发基础设施）的差异：
+#   - 应用本身容器化，与 MongoDB/MinIO 同一 Compose 项目、同一生命周期
+#   - MongoDB/MinIO 不发布宿主机端口，只能经内部网络 agent_graph_network 访问
+#   - Mongo Express 与 MinIO 控制台仅绑定 127.0.0.1，供 SSH 隧道运维使用
+#   - 应用默认发布在 127.0.0.1:${APP_PORT}，由你自己的 TLS 反向代理对外提供服务；
+#     若代理是 Docker 容器，可用 override 文件把应用接入代理的网络并去掉发布端口
+#
+# 使用：在项目根目录放置生产 .env（参考 docker/env.prod.example）后
+#   docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
+
+name: agent-graph
+
+x-logging: &bounded-logging
+  driver: "json-file"
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  app:
+    image: agent-graph:local
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    # 固定容器名便于反向代理按 DNS 名转发
+    container_name: agent-graph-app
+    restart: unless-stopped
+    init: true
+    read_only: true
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    environment:
+      # PORT 仅满足 Settings 必填校验；实际监听端口由镜像内 uvicorn 命令固定为 8000
+      PORT: "8000"
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:?Set PUBLIC_API_BASE_URL in .env}
+      MCP_CLIENT_HOST: 127.0.0.1
+      MCP_CLIENT_PORT: "20052"
+      MONGODB_URL: mongodb://${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in .env}:${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in .env}@mongodb:27017/${MONGO_DATABASE:?Set MONGO_DATABASE in .env}?authSource=admin
+      MONGODB_DB: ${MONGO_DATABASE:?Set MONGO_DATABASE in .env}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      MINIO_SECURE: "false"
+      MINIO_BUCKET_NAME: agent-graph
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # 镜像已设 AGENT_GRAPH_DIR/HOME；这里显式声明便于排查
+      AGENT_GRAPH_DIR: /var/lib/agent-graph
+      HOME: /var/lib/agent-graph
+      # 只信任反向代理地址发来的 X-Forwarded-For；填你实际的代理网段或地址
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8000"
+    volumes:
+      # AGENT_GRAPH_DIR：MCP 工具 venv、客户端日志、导出文件
+      - app_data:/var/lib/agent-graph
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
+    networks:
+      agent_graph_network: {}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    # SSE 长流（/api/graphs/execute、/api/agent/run）需要宽裕的排空时间
+    stop_grace_period: 60s
+    cpus: 1.5
+    mem_limit: 1536m
+    mem_reservation: 256m
+    logging: *bounded-logging
+
+  mongodb:
+    image: mongodb/mongodb-community-server:8.2.1-ubuntu2204-20251113T064937Z
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in .env}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:?Set MONGO_DATABASE in .env}
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      agent_graph_network: {}
+    command: ["--bind_ip_all"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    cpus: 1.0
+    mem_limit: 2g
+    mem_reservation: 512m
+    logging: *bounded-logging
+
+  mongo-express:
+    image: mongo-express:1.0.2-20-alpine3.19
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MONGO_EXPRESS_PORT:?Set MONGO_EXPRESS_PORT in .env}:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in .env}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in .env}
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:?Set MONGO_EXPRESS_USERNAME in .env}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:?Set MONGO_EXPRESS_PASSWORD in .env}
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      agent_graph_network: {}
+    cpus: 0.25
+    mem_limit: 256m
+    logging: *bounded-logging
+
+  minio:
+    image: keta1933/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+    ports:
+      # 控制台仅本机（SSH 隧道）；API 端口不发布，应用走内部网络
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:?Set MINIO_CONSOLE_PORT in .env}:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      agent_graph_network: {}
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
+    cpus: 0.5
+    mem_limit: 1g
+    logging: *bounded-logging
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+  minio_data:
+  app_data:
+
+networks:
+  agent_graph_network:
+    driver: bridge

@@ -87,6 +87,15 @@ const cleanServerConfigForEditor = (config: unknown): MCPServerConfig => {
     cleanConfig.env = env;
   }
 
+  if (config.headers && typeof config.headers === 'object' && !Array.isArray(config.headers) && Object.keys(config.headers).length > 0) {
+    const headers: Record<string, string> = {};
+    for (const [key, value] of Object.entries(config.headers)) {
+      if (typeof value !== 'string') throw new Error('Invalid header value');
+      headers[key] = value;
+    }
+    cleanConfig.headers = headers;
+  }
+
   return cleanConfig;
 };
 

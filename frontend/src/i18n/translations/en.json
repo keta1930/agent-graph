@@ -381,7 +381,10 @@
         "autoApprovePlaceholder": "tool1, tool2",
         "envVars": "Environment Variables",
         "envVarsHelp": "One per line, format: KEY=VALUE (e.g., API_KEY=your-key-here)",
-        "envVarsPlaceholder": "TAVILY_API_KEY=your-api-key-here\nOPENAI_API_KEY=your-openai-key\nDATABASE_URL=your-database-url"
+        "envVarsPlaceholder": "TAVILY_API_KEY=your-api-key-here\nOPENAI_API_KEY=your-openai-key\nDATABASE_URL=your-database-url",
+        "headers": "Request Headers (Auth)",
+        "headersHelp": "One per line, format: Key: Value (e.g., Authorization: Bearer your-token-here)",
+        "headersPlaceholder": "Authorization: Bearer your-token-here\nX-API-Key: your-api-key"
       },
       "card": {
         "disabled": "Disabled",
@@ -405,6 +408,8 @@
         "seconds": "seconds",
         "envVars": "Environment Variables",
         "envVarsConfigured": "{{count}} variables configured",
+        "headers": "Request Headers",
+        "headersConfigured": "{{count}} headers configured",
         "autoApprove": "Auto-approve",
         "availableTools": "Available Tools",
         "error": "Error"

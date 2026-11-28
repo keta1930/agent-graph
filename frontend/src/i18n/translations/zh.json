@@ -381,7 +381,10 @@
         "autoApprovePlaceholder": "tool1, tool2",
         "envVars": "环境变量",
         "envVarsHelp": "每行一个，格式为 KEY=VALUE （例如：API_KEY=your-key-here）",
-        "envVarsPlaceholder": "TAVILY_API_KEY=your-api-key-here\nOPENAI_API_KEY=your-openai-key\nDATABASE_URL=your-database-url"
+        "envVarsPlaceholder": "TAVILY_API_KEY=your-api-key-here\nOPENAI_API_KEY=your-openai-key\nDATABASE_URL=your-database-url",
+        "headers": "请求头（鉴权）",
+        "headersHelp": "每行一个，格式为 Key: Value（例如：Authorization: Bearer your-token-here）",
+        "headersPlaceholder": "Authorization: Bearer your-token-here\nX-API-Key: your-api-key"
       },
       "card": {
         "disabled": "已禁用",
@@ -405,6 +408,8 @@
         "seconds": "秒",
         "envVars": "环境变量",
         "envVarsConfigured": "已配置 {{count}} 个变量",
+        "headers": "请求头",
+        "headersConfigured": "已配置 {{count}} 个请求头",
         "autoApprove": "自动批准",
         "availableTools": "可用工具",
         "error": "错误"

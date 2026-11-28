@@ -14,6 +14,7 @@ class MCPServerConfig(BaseModel):
     transportType: str = Field(default="stdio", description="传输类型")
     url: Optional[str] = Field(None, description="SSE服务器URL")
     type: Optional[str] = Field(None, description="服务器类型，会自动转换为transportType")
+    headers: Optional[Dict[str, str]] = Field(None, description="HTTP/SSE请求头（如 Authorization）")
     env: Optional[Dict[str, str]] = Field(None, description="环境变量")
 
     # 团队共享字段
@@ -29,7 +30,7 @@ class MCPServerConfig(BaseModel):
                 self.transportType = 'sse'
             elif type_value == 'stdio':
                 self.transportType = 'stdio'
-            elif type_value in ['streamable_http', 'streamable-http']:
+            elif type_value in ['streamable_http', 'streamable-http', 'http']:
                 self.transportType = 'streamable_http'
 
         transport_type = self.transportType.lower().replace('-', '_')

@@ -14,7 +14,8 @@ import {
   Bot,
   User,
   Clock,
-  ChevronDown
+  ChevronDown,
+  KeyRound
 } from 'lucide-react';
 import { MCPServerConfig } from '../../types/mcp';
 import { useT } from '../../i18n/hooks';
@@ -100,6 +101,86 @@ const MCPServerCard: React.FC<MCPServerCardProps> = ({
         </div>
       );
     }
+  };
+
+  const renderHeaders = () => {
+    if (!config.headers || Object.keys(config.headers).length === 0) {
+      return null;
+    }
+
+    return (
+      <div>
+        <Text strong style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px' }}>
+          <KeyRound size={14} strokeWidth={1.5} style={{ color: '#8b7355' }} />
+          {t('pages.mcpManager.card.headers')}
+        </Text>
+        <div style={{ marginTop: '8px' }}>
+          <Collapse
+            size="small"
+            ghost
+            expandIcon={({ isActive }) => (
+              <ChevronDown
+                size={16}
+                strokeWidth={1.5}
+                style={{
+                  color: '#8b7355',
+                  transform: isActive ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.3s ease'
+                }}
+              />
+            )}
+            style={{
+              background: 'rgba(250, 248, 245, 0.6)',
+              border: '1px solid rgba(139, 115, 85, 0.12)',
+              borderRadius: '6px'
+            }}
+          >
+            <Panel
+              header={
+                <span style={{ fontSize: '13px', color: 'rgba(45, 45, 45, 0.75)' }}>
+                  {t('pages.mcpManager.card.headersConfigured', { count: Object.keys(config.headers).length })}
+                </span>
+              }
+              key="headers"
+            >
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.6)',
+                padding: '10px 12px',
+                borderRadius: '4px',
+                border: '1px solid rgba(139, 115, 85, 0.1)'
+              }}>
+                {Object.entries(config.headers).map(([key, value]) => (
+                  <div key={key} style={{
+                    marginBottom: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}>
+                    <code style={{
+                      background: 'rgba(139, 115, 85, 0.08)',
+                      color: '#8b7355',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      border: '1px solid rgba(139, 115, 85, 0.15)'
+                    }}>
+                      {key}
+                    </code>
+                    <span style={{
+                      fontSize: '13px',
+                      color: 'rgba(45, 45, 45, 0.65)'
+                    }}>
+                      {value.length > 8 ? `${value.substring(0, 4)}...${value.substring(value.length - 4)}` : '••••••'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </Collapse>
+        </div>
+      </div>
+    );
   };
 
   const renderEnvironmentVariables = () => {
@@ -520,6 +601,7 @@ const MCPServerCard: React.FC<MCPServerCardProps> = ({
           </span>
         </div>
         {renderEnvironmentVariables()}
+        {renderHeaders()}
         {Array.isArray(config.autoApprove) && config.autoApprove.length > 0 && (
           <div>
             <div style={{

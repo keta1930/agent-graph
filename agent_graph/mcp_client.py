@@ -191,10 +191,12 @@ class MCPServer:
             )
             streams = await stack.enter_async_context(stdio_client(parameters))
         elif transport == "sse":
-            streams = await stack.enter_async_context(sse_client(url=self.config["url"]))
+            streams = await stack.enter_async_context(
+                sse_client(url=self.config["url"], headers=self.config.get("headers"))
+            )
         else:
             read, write, _ = await stack.enter_async_context(
-                streamablehttp_client(url=self.config["url"])
+                streamablehttp_client(url=self.config["url"], headers=self.config.get("headers"))
             )
             streams = (read, write)
         self.stdio, self.write = streams

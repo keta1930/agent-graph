@@ -15,6 +15,7 @@ interface MCPFields {
   url?: string;
   serverName: string;
   envText: string;
+  headersText: string;
   args?: string;
   autoApprove: string;
 }
@@ -63,6 +64,7 @@ const MCPServerForm: React.FC<MCPServerFormProps> = ({
       args: config?.args?.join(', ') ?? '',
       autoApprove: config?.autoApprove?.join(', ') ?? '',
       envText: Object.entries(config?.env ?? {}).map(([key, value]) => key + '=' + value).join('\n'),
+      headersText: Object.entries(config?.headers ?? {}).map(([key, value]) => key + ': ' + value).join('\n'),
     });
   }, [visible, initialName, form]);
 
@@ -72,11 +74,16 @@ const MCPServerForm: React.FC<MCPServerFormProps> = ({
     setSubmitting(true);
     const owner = session.current;
     try {
-      const { serverName, envText, args, autoApprove, ...values } = await form.validateFields();
+      const { serverName, envText, headersText, args, autoApprove, ...values } = await form.validateFields();
       const env: Record<string, string> = {};
       for (const line of envText.split('\n')) {
         const separator = line.indexOf('=');
         if (separator > 0) env[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
+      }
+      const headers: Record<string, string> = {};
+      for (const line of headersText.split('\n')) {
+        const separator = line.indexOf(':');
+        if (separator > 0) headers[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
       }
       const serverConfig: MCPServerConfig = {
         ...values,
@@ -87,8 +94,10 @@ const MCPServerForm: React.FC<MCPServerFormProps> = ({
       if (serverConfig.transportType === 'stdio') {
         serverConfig.args = (args ?? '').split(',').map(value => value.trim()).filter(Boolean);
         delete serverConfig.url;
+        delete serverConfig.headers;
       } else {
         delete serverConfig.command;
+        if (Object.keys(headers).length > 0) serverConfig.headers = headers;
       }
       if (owner !== session.current) return;
       await onSubmit(serverName, serverConfig);
@@ -250,6 +259,26 @@ const MCPServerForm: React.FC<MCPServerFormProps> = ({
                 ? t('pages.mcpManager.form.sseUrlPlaceholder')
                 : t('pages.mcpManager.form.httpUrlPlaceholder')
             } />
+          </Form.Item>
+        )}
+
+        {(transportType === 'sse' || transportType === 'streamable_http') && (
+          <Form.Item
+            name="headersText"
+            label={
+              <div>
+                <Text>{t('pages.mcpManager.form.headers')}</Text>
+                <br />
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  {t('pages.mcpManager.form.headersHelp')}
+                </Text>
+              </div>
+            }
+          >
+            <TextArea
+              rows={3}
+              placeholder={t('pages.mcpManager.form.headersPlaceholder')}
+            />
           </Form.Item>
         )}
 

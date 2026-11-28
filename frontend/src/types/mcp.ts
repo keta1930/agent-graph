@@ -9,6 +9,7 @@ export interface MCPServerConfig {
   transportType: 'stdio' | 'sse' | 'streamable_http'; // 明确支持的类型
   url?: string; // SSE URL or HTTP URL
   base_url?: string;
+  headers?: Record<string, string>; // HTTP/SSE 请求头（如 Authorization）
   env?: Record<string, string>;
 
   // 团队共享字段
